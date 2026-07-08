@@ -1,0 +1,10 @@
+.env
+PRD.md
+docs/
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+.pytest__cache/
+.ruff__cache/
