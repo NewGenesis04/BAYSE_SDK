@@ -58,6 +58,16 @@ result = await client.place_order(
 )
 ```
 
+### Sports leagues
+
+```python
+from bayse_markets.sports import list_leagues
+
+leagues = await list_leagues(client)
+for league in leagues.data:
+    print(league["name"])
+```
+
 ### Mint shares (market maker)
 
 ```python
@@ -66,8 +76,8 @@ from bayse_markets.market_maker import mint_shares
 result = await mint_shares(
     client,
     market_id="mkt_456",
-    quantity=1000,
-    currency="NGN",
+    quantity=100,
+    currency="USD",
 )
 ```
 
