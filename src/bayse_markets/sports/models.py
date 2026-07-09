@@ -1,37 +1,79 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import BaseModel, Field
+
+from bayse_markets.models._shared import PaginationMeta
 
 
 class SportsLeague(BaseModel):
     """A sports league."""
 
-    id: str
     name: str
-    sport: str | None = None
-    country: str | None = None
+    key: str
+    short_name: str = Field(alias="shortName")
+    image_url: str = Field(alias="imageUrl")
 
 
 class SportsTeam(BaseModel):
     """A sports team."""
 
     id: str
+    sport: str
     name: str
-    abbreviation: str | None = None
-    league_id: str | None = Field(default=None, alias="leagueId")
-    logo_url: str | None = Field(default=None, alias="logoUrl")
+    slug: str
+    short_code: str = Field(alias="shortCode")
+    league: str
+    image_url: str | None = Field(default=None, alias="imageUrl")
+    is_popular: bool = Field(alias="isPopular")
+
+
+class GameTeam(BaseModel):
+    """Team details nested inside a sports game."""
+
+    id: str
+    sport: str
+    name: str
+    slug: str
+    short_code: str = Field(alias="shortCode")
+    league: str
+    image_url: str | None = Field(default=None, alias="imageUrl")
+    is_popular: bool = Field(alias="isPopular")
 
 
 class SportsGame(BaseModel):
     """A sports game/match."""
 
     id: str
-    league_id: str = Field(alias="leagueId")
+    slug: str
+    sport: str
     home_team_id: str = Field(alias="homeTeamId")
     away_team_id: str = Field(alias="awayTeamId")
-    home_team_name: str | None = Field(default=None, alias="homeTeamName")
-    away_team_name: str | None = Field(default=None, alias="awayTeamName")
-    start_time: str | None = Field(default=None, alias="startTime")
-    status: str | None = None
-    home_score: int | None = Field(default=None, alias="homeScore")
-    away_score: int | None = Field(default=None, alias="awayScore")
+    start_date: datetime = Field(alias="startDate")
+    status: str
+    is_live: bool = Field(alias="isLive")
+    is_popular: bool = Field(alias="isPopular")
+    league: str
+    home_team: GameTeam = Field(alias="homeTeam")
+    away_team: GameTeam = Field(alias="awayTeam")
+
+
+class ListLeaguesResponse(BaseModel):
+    """Wrapper for the sports leagues list response."""
+
+    leagues: list[SportsLeague]
+
+
+class ListTeamsResponse(BaseModel):
+    """Wrapper for the paginated sports teams list response."""
+
+    teams: list[SportsTeam]
+    pagination: PaginationMeta
+
+
+class ListGamesResponse(BaseModel):
+    """Wrapper for the paginated sports games list response."""
+
+    games: list[SportsGame]
+    pagination: PaginationMeta

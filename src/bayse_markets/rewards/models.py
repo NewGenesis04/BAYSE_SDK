@@ -4,29 +4,45 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from bayse_markets.models._shared import PaginationMeta
+
 
 class LiquidityReward(BaseModel):
-    """A completed epoch payout."""
+    """A completed liquidity reward epoch payout."""
 
     epoch_id: str = Field(alias="epochId")
+    event_id: str = Field(alias="eventId")
     market_id: str = Field(alias="marketId")
-    reward_pool: float = Field(alias="rewardPool")
-    user_share: float = Field(alias="userShare")
+    accumulated_shares: float = Field(alias="accumulatedShares")
+    sample_count: int = Field(alias="sampleCount")
     payout: float
-    currency: str
+    is_paid: bool = Field(alias="isPaid")
     epoch_start: datetime = Field(alias="epochStart")
     epoch_end: datetime = Field(alias="epochEnd")
-    paid_at: datetime = Field(alias="paidAt")
+    status: str
 
 
 class ActiveLiquidityReward(BaseModel):
-    """In-progress epoch accumulation with estimated payouts."""
+    """In-progress liquidity reward accumulation."""
 
+    epoch_id: str = Field(alias="epochId")
+    event_id: str = Field(alias="eventId")
     market_id: str = Field(alias="marketId")
-    reward_pool: float = Field(alias="rewardPool")
-    estimated_share: float = Field(alias="estimatedShare")
+    accumulated_shares: float = Field(alias="accumulatedShares")
+    sample_count: int = Field(alias="sampleCount")
     estimated_payout: float = Field(alias="estimatedPayout")
-    currency: str
     epoch_start: datetime = Field(alias="epochStart")
     epoch_end: datetime = Field(alias="epochEnd")
-    samples_so_far: int = Field(alias="samplesSoFar")
+
+
+class ListRewardsResponse(BaseModel):
+    """Wrapper for the paginated liquidity rewards list response."""
+
+    data: list[LiquidityReward]
+    pagination: PaginationMeta
+
+
+class ActiveRewardsResponse(BaseModel):
+    """Wrapper for the active liquidity rewards response."""
+
+    data: list[ActiveLiquidityReward]

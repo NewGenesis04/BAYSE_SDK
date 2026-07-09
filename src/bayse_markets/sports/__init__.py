@@ -12,15 +12,18 @@ Usage:
 
 from __future__ import annotations
 
+from typing import Any
+
 from bayse_markets._base import BayseResponse
 from bayse_markets._client import BayseClient
+from bayse_markets.sports.models import ListGamesResponse, ListLeaguesResponse, ListTeamsResponse
 
 
 async def list_leagues(
     client: BayseClient,
     *,
     trace_id: str | None = None,
-) -> BayseResponse[dict]:
+) -> BayseResponse[ListLeaguesResponse]:
     """List all sports leagues.
 
     Args:
@@ -30,58 +33,109 @@ async def list_leagues(
     Returns:
         Response containing a list of sports leagues.
     """
-    return await client._request(
+    resp = await client._request(
         "GET",
         "/v1/pm/sports/leagues",
         auth_level="public",
         trace_id=trace_id,
+    )
+    parsed = ListLeaguesResponse.model_validate(resp.data)
+    return BayseResponse(
+        status_code=resp.status_code,
+        data=parsed,
+        timestamp=resp.timestamp,
+        headers=resp.headers,
+        trace_id=resp.trace_id,
     )
 
 
 async def list_teams(
     client: BayseClient,
     *,
+    league: str | None = None,
+    sport: str | None = None,
+    page: int = 1,
+    size: int = 50,
     trace_id: str | None = None,
-) -> BayseResponse[dict]:
-    """List all sports teams.
+) -> BayseResponse[ListTeamsResponse]:
+    """List sports teams, optionally filtered by league or sport.
 
     Args:
         client: An open ``BayseClient`` instance.
+        league: Filter by league key (e.g. ``"epl"``).
+        sport: Filter by sport (e.g. ``"soccer"``).
+        page: Page number (default 1).
+        size: Results per page, max 100 (default 50).
         trace_id: Optional trace ID override.
 
     Returns:
-        Response containing a list of sports teams.
+        Response containing a paginated list of sports teams.
     """
-    return await client._request(
+    params: dict[str, Any] = {"page": page, "size": size}
+    if league is not None:
+        params["league"] = league
+    if sport is not None:
+        params["sport"] = sport
+
+    resp = await client._request(
         "GET",
         "/v1/pm/sports/teams",
+        params=params,
         auth_level="public",
         trace_id=trace_id,
+    )
+    parsed = ListTeamsResponse.model_validate(resp.data)
+    return BayseResponse(
+        status_code=resp.status_code,
+        data=parsed,
+        timestamp=resp.timestamp,
+        headers=resp.headers,
+        trace_id=resp.trace_id,
     )
 
 
 async def list_games(
     client: BayseClient,
     *,
-    params: dict | None = None,
+    league: str | None = None,
+    sport: str | None = None,
+    page: int = 1,
+    size: int = 50,
     trace_id: str | None = None,
-) -> BayseResponse[dict]:
-    """List sports games with optional filters.
+) -> BayseResponse[ListGamesResponse]:
+    """List sports games, optionally filtered by league or sport.
 
     Args:
         client: An open ``BayseClient`` instance.
-        params: Optional query parameters (e.g. league, date).
+        league: Filter by league key (e.g. ``"epl"``).
+        sport: Filter by sport (e.g. ``"soccer"``).
+        page: Page number (default 1).
+        size: Results per page, max 100 (default 50).
         trace_id: Optional trace ID override.
 
     Returns:
-        Response containing a list of sports games.
+        Response containing a paginated list of sports games.
     """
-    return await client._request(
+    params: dict[str, Any] = {"page": page, "size": size}
+    if league is not None:
+        params["league"] = league
+    if sport is not None:
+        params["sport"] = sport
+
+    resp = await client._request(
         "GET",
         "/v1/pm/sports/games",
         params=params,
         auth_level="public",
         trace_id=trace_id,
+    )
+    parsed = ListGamesResponse.model_validate(resp.data)
+    return BayseResponse(
+        status_code=resp.status_code,
+        data=parsed,
+        timestamp=resp.timestamp,
+        headers=resp.headers,
+        trace_id=resp.trace_id,
     )
 
 

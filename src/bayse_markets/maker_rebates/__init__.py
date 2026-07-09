@@ -2,24 +2,27 @@ from __future__ import annotations
 
 from bayse_markets._base import BayseResponse
 from bayse_markets._client import BayseClient
-from bayse_markets.rewards.models import ActiveRewardsResponse, ListRewardsResponse
+from bayse_markets.maker_rebates.models import (
+    ActiveMakerRebatesResponse,
+    ListMakerRebatesResponse,
+)
 
 
-async def list_rewards(
+async def list_maker_rebates(
     client: BayseClient,
     *,
     page: int = 1,
     size: int = 20,
     trace_id: str | None = None,
-) -> BayseResponse[ListRewardsResponse]:
+) -> BayseResponse[ListMakerRebatesResponse]:
     resp = await client._request(
         "GET",
-        "/v1/pm/liquidity-rewards",
+        "/v1/pm/maker-rebates",
         params={"page": page, "size": size},
         auth_level="read",
         trace_id=trace_id,
     )
-    parsed = ListRewardsResponse.model_validate(resp.data)
+    parsed = ListMakerRebatesResponse.model_validate(resp.data)
     return BayseResponse(
         status_code=resp.status_code,
         data=parsed,
@@ -29,18 +32,18 @@ async def list_rewards(
     )
 
 
-async def get_active_rewards(
+async def get_active_maker_rebates(
     client: BayseClient,
     *,
     trace_id: str | None = None,
-) -> BayseResponse[ActiveRewardsResponse]:
+) -> BayseResponse[ActiveMakerRebatesResponse]:
     resp = await client._request(
         "GET",
-        "/v1/pm/liquidity-rewards/active",
+        "/v1/pm/maker-rebates/active",
         auth_level="read",
         trace_id=trace_id,
     )
-    parsed = ActiveRewardsResponse.model_validate(resp.data)
+    parsed = ActiveMakerRebatesResponse.model_validate(resp.data)
     return BayseResponse(
         status_code=resp.status_code,
         data=parsed,
@@ -51,6 +54,6 @@ async def get_active_rewards(
 
 
 __all__ = [
-    "list_rewards",
-    "get_active_rewards",
+    "list_maker_rebates",
+    "get_active_maker_rebates",
 ]

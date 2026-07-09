@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from bayse_markets._base import BayseResponse
 from bayse_markets._client import BayseClient
+from bayse_markets.market_maker.models import BurnResponse, MintResponse
 
 
 async def mint_shares(
@@ -11,7 +12,7 @@ async def mint_shares(
     quantity: float,
     currency: str = "USD",
     trace_id: str | None = None,
-) -> BayseResponse[dict]:
+) -> BayseResponse[MintResponse]:
     """Mint YES+NO share pairs for a market.
 
     Deposits funds and receives an equal number of YES and NO shares.
@@ -31,12 +32,20 @@ async def mint_shares(
         This is a **market maker** operation. Minting creates complete
         sets (YES+NO pairs). Most users should use the order book instead.
     """
-    return await client._request(
+    resp = await client._request(
         "POST",
         f"/v1/pm/markets/{market_id}/mint",
         body={"quantity": quantity, "currency": currency},
         auth_level="write",
         trace_id=trace_id,
+    )
+    parsed = MintResponse.model_validate(resp.data)
+    return BayseResponse(
+        status_code=resp.status_code,
+        data=parsed,
+        timestamp=resp.timestamp,
+        headers=resp.headers,
+        trace_id=resp.trace_id,
     )
 
 
@@ -47,7 +56,7 @@ async def burn_shares(
     quantity: float,
     currency: str = "USD",
     trace_id: str | None = None,
-) -> BayseResponse[dict]:
+) -> BayseResponse[BurnResponse]:
     """Burn YES+NO share pairs for a market.
 
     Destroys equal YES and NO shares and receives funds back.
@@ -68,10 +77,18 @@ async def burn_shares(
         sets (YES+NO pairs). You must hold sufficient shares of both
         outcomes. Most users should use the order book instead.
     """
-    return await client._request(
+    resp = await client._request(
         "POST",
         f"/v1/pm/markets/{market_id}/burn",
         body={"quantity": quantity, "currency": currency},
         auth_level="write",
         trace_id=trace_id,
+    )
+    parsed = BurnResponse.model_validate(resp.data)
+    return BayseResponse(
+        status_code=resp.status_code,
+        data=parsed,
+        timestamp=resp.timestamp,
+        headers=resp.headers,
+        trace_id=resp.trace_id,
     )

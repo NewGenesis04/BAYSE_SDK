@@ -1,26 +1,144 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
 
 from pydantic import BaseModel, Field
+
+from bayse_markets.models._shared import PaginationMeta
 
 
 class Order(BaseModel):
     """A prediction market order."""
 
     id: str
-    event_id: str = Field(alias="eventId")
     market_id: str = Field(alias="marketId")
-    side: str
     outcome: str
-    amount: float
-    currency: str
-    price: float | None = None
+    side: str
+    order_type: str = Field(alias="orderType")
+    stp_mode: str = Field(alias="stpMode")
     status: str
-    filled_amount: float | None = Field(default=None, alias="filledAmount")
-    remaining_amount: float | None = Field(default=None, alias="remainingAmount")
+    amount: float
+    price: float
+    size: float
+    filled_size: float = Field(alias="filledSize")
+    remaining_size: float = Field(alias="remainingSize")
+    avg_fill_price: float | None = Field(default=None, alias="avgFillPrice")
+    fee: float | None = None
+    currency: str
+    created_at: datetime = Field(alias="createdAt")
+    updated_at: datetime = Field(alias="updatedAt")
+
+
+class PlacedOrder(BaseModel):
+    """An order returned by place-order or batch endpoints.
+    Covers both AMM and CLOB engine shapes — all fields optional.
+    """
+
+    id: str
+    outcome: str | None = None
+    side: str | None = None
     type: str | None = None
+    status: str | None = None
+    amount: float | None = None
+    price: float | None = None
+    quantity: float | None = None
+    currency: str | None = None
+    market_id: str | None = Field(default=None, alias="marketId")
+    user_id: str | None = Field(default=None, alias="userId")
+    order_type: str | None = Field(default=None, alias="orderType")
+    size: float | None = None
+    filled_size: float | None = Field(default=None, alias="filledSize")
+    remaining_size: float | None = Field(default=None, alias="remainingSize")
+    avg_fill_price: float | None = Field(default=None, alias="avgFillPrice")
+    fee: float | None = None
+    post_only: bool | None = Field(default=None, alias="postOnly")
+    stp_mode: str | None = Field(default=None, alias="stpMode")
     created_at: datetime | None = Field(default=None, alias="createdAt")
     updated_at: datetime | None = Field(default=None, alias="updatedAt")
-    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class PlaceOrderResponse(BaseModel):
+    """Response from placing a single order."""
+
+    engine: str
+    order: PlacedOrder
+
+
+class CancelOrderResponse(BaseModel):
+    """Response from cancelling a single order."""
+
+    message: str
+
+
+class ListOrdersResponse(BaseModel):
+    """Wrapper for the paginated orders list response."""
+
+    orders: list[Order]
+    pagination: PaginationMeta
+
+
+class BatchOrderError(BaseModel):
+    """Per-item error in a batch response."""
+
+    code: str
+    message: str
+
+
+class BatchSummary(BaseModel):
+    """Summary counts for a batch operation."""
+
+    total: int
+    succeeded: int
+    failed: int
+
+
+class BatchPlaceResult(BaseModel):
+    """A single result item from a batch place response."""
+
+    index: int
+    client_order_id: str | None = Field(default=None, alias="clientOrderId")
+    success: bool
+    order: PlacedOrder | None = None
+    error: BatchOrderError | None = None
+
+
+class BatchPlaceResponse(BaseModel):
+    """Response from batch order placement."""
+
+    engine: str
+    results: list[BatchPlaceResult]
+    summary: BatchSummary
+
+
+class BatchAmendResult(BaseModel):
+    """A single result item from a batch amend response."""
+
+    index: int
+    order_id: str = Field(alias="orderId")
+    success: bool
+    order: PlacedOrder | None = None
+    error: BatchOrderError | None = None
+
+
+class BatchAmendResponse(BaseModel):
+    """Response from batch order amendment."""
+
+    engine: str
+    results: list[BatchAmendResult]
+    summary: BatchSummary
+
+
+class BatchCancelResult(BaseModel):
+    """A single result item from a batch cancel response."""
+
+    order_id: str = Field(alias="orderId")
+    success: bool
+    error: BatchOrderError | None = None
+
+
+class BatchCancelResponse(BaseModel):
+    """Response from batch order cancellation."""
+
+    engine: str
+    results: list[BatchCancelResult]
+    summary: BatchSummary

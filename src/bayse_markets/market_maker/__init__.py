@@ -10,8 +10,13 @@
 """
 
 from bayse_markets.market_maker._api import burn_shares, mint_shares
+from bayse_markets.market_maker.models import BurnRequest, BurnResponse, MintRequest, MintResponse
 
 __all__ = [
-    "mint_shares",
     "burn_shares",
+    "BurnRequest",
+    "BurnResponse",
+    "mint_shares",
+    "MintRequest",
+    "MintResponse",
 ]

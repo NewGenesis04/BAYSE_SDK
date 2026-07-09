@@ -20,7 +20,26 @@ from bayse_markets.exceptions import (
     NetworkError,
     error_from_response,
 )
+from bayse_markets.models.activity import ListActivitiesResponse
 from bayse_markets.models.event import Event, LeanEvent, ListEventSeriesResponse, ListEventsResponse
+from bayse_markets.models.order import (
+    BatchAmendResponse,
+    BatchCancelResponse,
+    BatchPlaceResponse,
+    CancelOrderResponse,
+    ListOrdersResponse,
+    Order,
+    PlaceOrderResponse,
+)
+from bayse_markets.models.order_book import OrderBook
+from bayse_markets.models.pnl import PnLResponse
+from bayse_markets.models.portfolio import PortfolioResponse
+from bayse_markets.models.price_history import PricePoint
+from bayse_markets.models.quote import Quote
+from bayse_markets.models.system import HealthResponse, VersionResponse
+from bayse_markets.models.ticker import Ticker
+from bayse_markets.models.trade import ListTradesResponse
+from bayse_markets.models.wallet import ListAssetsResponse
 
 log = get_logger()
 
@@ -125,6 +144,7 @@ class BayseClient:
         body: dict[str, Any] | None = None,
         params: dict[str, Any] | None = None,
         auth_level: str = "public",
+        headers: dict[str, str] | None = None,
         trace_id: str | None = None,
         max_retries: int | None = None,
     ) -> BayseResponse[Any]:
@@ -132,13 +152,16 @@ class BayseClient:
         if body is not None:
             body_str = __import__("json").dumps(body)
 
-        headers = self._build_headers(
+        base_headers = self._build_headers(
             method=method,
             path=path,
             body=body_str,
             trace_id=trace_id,
             auth_level=auth_level,
         )
+        if headers:
+            base_headers.update(headers)
+        headers = base_headers
 
         max_retries = max_retries if max_retries is not None else self._retry.config.max_retries
 
@@ -213,13 +236,29 @@ class BayseClient:
 
     # ── System ──────────────────────────────────────────────────────────
 
-    async def health(self, *, trace_id: str | None = None) -> BayseResponse[Any]:
+    async def health(self, *, trace_id: str | None = None) -> BayseResponse[HealthResponse]:
         """GET /health — check API health."""
-        return await self._request("GET", "/health", auth_level="public", trace_id=trace_id)
+        resp = await self._request("GET", "/health", auth_level="public", trace_id=trace_id)
+        parsed = HealthResponse.model_validate(resp.data)
+        return BayseResponse(
+            status_code=resp.status_code,
+            data=parsed,
+            timestamp=resp.timestamp,
+            headers=resp.headers,
+            trace_id=resp.trace_id,
+        )
 
-    async def version(self, *, trace_id: str | None = None) -> BayseResponse[Any]:
+    async def version(self, *, trace_id: str | None = None) -> BayseResponse[VersionResponse]:
         """GET /version — get API version."""
-        return await self._request("GET", "/version", auth_level="public", trace_id=trace_id)
+        resp = await self._request("GET", "/version", auth_level="public", trace_id=trace_id)
+        parsed = VersionResponse.model_validate(resp.data)
+        return BayseResponse(
+            status_code=resp.status_code,
+            data=parsed,
+            timestamp=resp.timestamp,
+            headers=resp.headers,
+            trace_id=resp.trace_id,
+        )
 
     # ── Events ──────────────────────────────────────────────────────────
 
@@ -387,14 +426,22 @@ class BayseClient:
         *,
         body: dict[str, Any],
         trace_id: str | None = None,
-    ) -> BayseResponse[Any]:
+    ) -> BayseResponse[Quote]:
         """POST /v1/pm/events/{eventId}/markets/{marketId}/quote — get a quote."""
-        return await self._request(
+        resp = await self._request(
             "POST",
             f"/v1/pm/events/{event_id}/markets/{market_id}/quote",
             body=body,
             auth_level="public",
             trace_id=trace_id,
+        )
+        parsed = Quote.model_validate(resp.data)
+        return BayseResponse(
+            status_code=resp.status_code,
+            data=parsed,
+            timestamp=resp.timestamp,
+            headers=resp.headers,
+            trace_id=resp.trace_id,
         )
 
     # ── Orders ──────────────────────────────────────────────────────────
@@ -407,9 +454,9 @@ class BayseClient:
         body: dict[str, Any],
         trace_id: str | None = None,
         max_retries: int | None = None,
-    ) -> BayseResponse[Any]:
+    ) -> BayseResponse[PlaceOrderResponse]:
         """POST /v1/pm/events/{eventId}/markets/{marketId}/orders — place an order."""
-        return await self._request(
+        resp = await self._request(
             "POST",
             f"/v1/pm/events/{event_id}/markets/{market_id}/orders",
             body=body,
@@ -417,21 +464,56 @@ class BayseClient:
             trace_id=trace_id,
             max_retries=max_retries,
         )
+        parsed = PlaceOrderResponse.model_validate(resp.data)
+        return BayseResponse(
+            status_code=resp.status_code,
+            data=parsed,
+            timestamp=resp.timestamp,
+            headers=resp.headers,
+            trace_id=resp.trace_id,
+        )
 
     async def list_orders(
         self,
         *,
+        side: str | None = None,
+        status: str | None = None,
+        event_id: str | None = None,
+        market_id: str | None = None,
+        outcome_id: str | None = None,
+        currency: str | None = None,
         page: int = 1,
         size: int = 20,
         trace_id: str | None = None,
-    ) -> BayseResponse[Any]:
+    ) -> BayseResponse[ListOrdersResponse]:
         """GET /v1/pm/orders — list orders."""
-        return await self._request(
+        params: dict[str, Any] = {"page": page, "size": size}
+        if side is not None:
+            params["side"] = side
+        if status is not None:
+            params["status"] = status
+        if event_id is not None:
+            params["eventId"] = event_id
+        if market_id is not None:
+            params["marketId"] = market_id
+        if outcome_id is not None:
+            params["outcomeId"] = outcome_id
+        if currency is not None:
+            params["currency"] = currency
+        resp = await self._request(
             "GET",
             "/v1/pm/orders",
-            params={"page": page, "size": size},
+            params=params,
             auth_level="read",
             trace_id=trace_id,
+        )
+        parsed = ListOrdersResponse.model_validate(resp.data)
+        return BayseResponse(
+            status_code=resp.status_code,
+            data=parsed,
+            timestamp=resp.timestamp,
+            headers=resp.headers,
+            trace_id=resp.trace_id,
         )
 
     async def get_order(
@@ -439,13 +521,21 @@ class BayseClient:
         order_id: str,
         *,
         trace_id: str | None = None,
-    ) -> BayseResponse[Any]:
+    ) -> BayseResponse[Order]:
         """GET /v1/pm/orders/{orderId} — get a single order."""
-        return await self._request(
+        resp = await self._request(
             "GET",
             f"/v1/pm/orders/{order_id}",
             auth_level="read",
             trace_id=trace_id,
+        )
+        parsed = Order.model_validate(resp.data)
+        return BayseResponse(
+            status_code=resp.status_code,
+            data=parsed,
+            timestamp=resp.timestamp,
+            headers=resp.headers,
+            trace_id=resp.trace_id,
         )
 
     async def cancel_order(
@@ -454,14 +544,117 @@ class BayseClient:
         *,
         trace_id: str | None = None,
         max_retries: int | None = None,
-    ) -> BayseResponse[Any]:
+    ) -> BayseResponse[CancelOrderResponse]:
         """DELETE /v1/pm/orders/{orderId} — cancel an order."""
-        return await self._request(
+        resp = await self._request(
             "DELETE",
             f"/v1/pm/orders/{order_id}",
             auth_level="write",
             trace_id=trace_id,
             max_retries=max_retries,
+        )
+        parsed = CancelOrderResponse.model_validate(resp.data)
+        return BayseResponse(
+            status_code=resp.status_code,
+            data=parsed,
+            timestamp=resp.timestamp,
+            headers=resp.headers,
+            trace_id=resp.trace_id,
+        )
+
+    # ── Batch Orders ────────────────────────────────────────────────────
+
+    async def batch_place_orders(
+        self,
+        *,
+        body: dict[str, Any],
+        idempotency_key: str | None = None,
+        trace_id: str | None = None,
+        max_retries: int | None = None,
+    ) -> BayseResponse[BatchPlaceResponse]:
+        """POST /v1/pm/orders/batch — place up to 20 orders in one round-trip."""
+        headers: dict[str, str] = {}
+        if idempotency_key is not None:
+            headers["Idempotency-Key"] = idempotency_key
+
+        resp = await self._request(
+            "POST",
+            "/v1/pm/orders/batch",
+            body=body,
+            auth_level="write",
+            headers=headers,
+            trace_id=trace_id,
+            max_retries=max_retries,
+        )
+        parsed = BatchPlaceResponse.model_validate(resp.data)
+        return BayseResponse(
+            status_code=resp.status_code,
+            data=parsed,
+            timestamp=resp.timestamp,
+            headers=resp.headers,
+            trace_id=resp.trace_id,
+        )
+
+    async def batch_amend_orders(
+        self,
+        *,
+        body: dict[str, Any],
+        idempotency_key: str | None = None,
+        trace_id: str | None = None,
+        max_retries: int | None = None,
+    ) -> BayseResponse[BatchAmendResponse]:
+        """POST /v1/pm/orders/batch/amend — modify price/size of up to 20 orders."""
+        headers: dict[str, str] = {}
+        if idempotency_key is not None:
+            headers["Idempotency-Key"] = idempotency_key
+
+        resp = await self._request(
+            "POST",
+            "/v1/pm/orders/batch/amend",
+            body=body,
+            auth_level="write",
+            headers=headers,
+            trace_id=trace_id,
+            max_retries=max_retries,
+        )
+        parsed = BatchAmendResponse.model_validate(resp.data)
+        return BayseResponse(
+            status_code=resp.status_code,
+            data=parsed,
+            timestamp=resp.timestamp,
+            headers=resp.headers,
+            trace_id=resp.trace_id,
+        )
+
+    async def batch_cancel_orders(
+        self,
+        *,
+        body: dict[str, Any],
+        idempotency_key: str | None = None,
+        trace_id: str | None = None,
+        max_retries: int | None = None,
+    ) -> BayseResponse[BatchCancelResponse]:
+        """DELETE /v1/pm/orders/batch — cancel up to 100 orders in one round-trip."""
+        headers: dict[str, str] = {}
+        if idempotency_key is not None:
+            headers["Idempotency-Key"] = idempotency_key
+
+        resp = await self._request(
+            "DELETE",
+            "/v1/pm/orders/batch",
+            body=body,
+            auth_level="write",
+            headers=headers,
+            trace_id=trace_id,
+            max_retries=max_retries,
+        )
+        parsed = BatchCancelResponse.model_validate(resp.data)
+        return BayseResponse(
+            status_code=resp.status_code,
+            data=parsed,
+            timestamp=resp.timestamp,
+            headers=resp.headers,
+            trace_id=resp.trace_id,
         )
 
     # ── Portfolio ───────────────────────────────────────────────────────
@@ -470,13 +663,62 @@ class BayseClient:
         self,
         *,
         trace_id: str | None = None,
-    ) -> BayseResponse[Any]:
+    ) -> BayseResponse[PortfolioResponse]:
         """GET /v1/pm/portfolio — get portfolio."""
-        return await self._request(
+        resp = await self._request(
             "GET",
             "/v1/pm/portfolio",
             auth_level="read",
             trace_id=trace_id,
+        )
+        parsed = PortfolioResponse.model_validate(resp.data)
+        return BayseResponse(
+            status_code=resp.status_code,
+            data=parsed,
+            timestamp=resp.timestamp,
+            headers=resp.headers,
+            trace_id=resp.trace_id,
+        )
+
+    # ── PnL ─────────────────────────────────────────────────────────────
+
+    async def get_pnl(
+        self,
+        *,
+        time_period: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        currency: str | None = None,
+        breakdown: bool = False,
+        trace_id: str | None = None,
+    ) -> BayseResponse[PnLResponse]:
+        """GET /v1/pm/pnl — get realized profit and loss."""
+        params: dict[str, Any] = {}
+        if time_period is not None:
+            params["timePeriod"] = time_period
+        if start is not None:
+            params["start"] = start
+        if end is not None:
+            params["end"] = end
+        if currency is not None:
+            params["currency"] = currency
+        if breakdown:
+            params["breakdown"] = "true"
+
+        resp = await self._request(
+            "GET",
+            "/v1/pm/pnl",
+            params=params,
+            auth_level="read",
+            trace_id=trace_id,
+        )
+        parsed = PnLResponse.model_validate(resp.data)
+        return BayseResponse(
+            status_code=resp.status_code,
+            data=parsed,
+            timestamp=resp.timestamp,
+            headers=resp.headers,
+            trace_id=resp.trace_id,
         )
 
     # ── Wallet ──────────────────────────────────────────────────────────
@@ -485,13 +727,21 @@ class BayseClient:
         self,
         *,
         trace_id: str | None = None,
-    ) -> BayseResponse[Any]:
+    ) -> BayseResponse[ListAssetsResponse]:
         """GET /v1/wallet/assets — get wallet assets."""
-        return await self._request(
+        resp = await self._request(
             "GET",
             "/v1/wallet/assets",
             auth_level="read",
             trace_id=trace_id,
+        )
+        parsed = ListAssetsResponse.model_validate(resp.data)
+        return BayseResponse(
+            status_code=resp.status_code,
+            data=parsed,
+            timestamp=resp.timestamp,
+            headers=resp.headers,
+            trace_id=resp.trace_id,
         )
 
     # ── Market Data ─────────────────────────────────────────────────────
@@ -500,43 +750,108 @@ class BayseClient:
         self,
         event_id: str,
         *,
+        time_period: str = "24H",
+        market_ids: list[str] | None = None,
+        outcome: str | None = None,
         trace_id: str | None = None,
-    ) -> BayseResponse[Any]:
+    ) -> BayseResponse[dict[str, list[PricePoint]]]:
         """GET /v1/pm/events/{eventId}/price-history — get price history."""
-        return await self._request(
+        params: dict[str, Any] = {"timePeriod": time_period}
+        if market_ids is not None:
+            params["marketId[]"] = ",".join(market_ids)
+        if outcome is not None:
+            params["outcome"] = outcome
+
+        resp = await self._request(
             "GET",
             f"/v1/pm/events/{event_id}/price-history",
-            auth_level="read",
+            params=params,
+            auth_level="public",
             trace_id=trace_id,
+        )
+        parsed: dict[str, list[PricePoint]] = {
+            market_id: [PricePoint.model_validate(p) for p in points]
+            for market_id, points in resp.data.items()
+        }
+        return BayseResponse(
+            status_code=resp.status_code,
+            data=parsed,
+            timestamp=resp.timestamp,
+            headers=resp.headers,
+            trace_id=resp.trace_id,
         )
 
     async def get_order_books(
         self,
+        outcome_ids: list[str],
         *,
-        params: dict[str, Any] | None = None,
+        depth: int = 10,
+        currency: str = "USD",
         trace_id: str | None = None,
-    ) -> BayseResponse[Any]:
-        """GET /v1/pm/books — get order books."""
-        return await self._request(
+    ) -> BayseResponse[list[OrderBook]]:
+        """GET /v1/pm/books — get order books for one or more outcomes.
+
+        Args:
+            outcome_ids: One or more outcome UUIDs.
+            depth: Number of price levels on each side (default 10).
+            currency: Price display currency (default ``"USD"``).
+            trace_id: Optional trace ID override.
+        """
+        params: dict[str, Any] = {"depth": depth, "currency": currency}
+        params["outcomeId[]"] = outcome_ids
+
+        resp = await self._request(
             "GET",
             "/v1/pm/books",
             params=params,
-            auth_level="read",
+            auth_level="public",
             trace_id=trace_id,
+        )
+        parsed = [OrderBook.model_validate(item) for item in resp.data]
+        return BayseResponse(
+            status_code=resp.status_code,
+            data=parsed,
+            timestamp=resp.timestamp,
+            headers=resp.headers,
+            trace_id=resp.trace_id,
         )
 
     async def get_ticker(
         self,
         market_id: str,
         *,
+        outcome: str | None = None,
+        outcome_id: str | None = None,
         trace_id: str | None = None,
-    ) -> BayseResponse[Any]:
-        """GET /v1/pm/markets/{marketId}/ticker — get ticker."""
-        return await self._request(
+    ) -> BayseResponse[Ticker]:
+        """GET /v1/pm/markets/{marketId}/ticker — get ticker.
+
+        Args:
+            market_id: UUID of the market.
+            outcome: Outcome label (``"YES"`` or ``"NO"``). Required if ``outcome_id`` not provided.
+            outcome_id: UUID of the outcome. Required if ``outcome`` not provided.
+            trace_id: Optional trace ID override.
+        """
+        params: dict[str, Any] = {}
+        if outcome is not None:
+            params["outcome"] = outcome
+        if outcome_id is not None:
+            params["outcomeId"] = outcome_id
+
+        resp = await self._request(
             "GET",
             f"/v1/pm/markets/{market_id}/ticker",
+            params=params,
             auth_level="read",
             trace_id=trace_id,
+        )
+        parsed = Ticker.model_validate(resp.data)
+        return BayseResponse(
+            status_code=resp.status_code,
+            data=parsed,
+            timestamp=resp.timestamp,
+            headers=resp.headers,
+            trace_id=resp.trace_id,
         )
 
     async def get_trades(
@@ -544,14 +859,22 @@ class BayseClient:
         *,
         params: dict[str, Any] | None = None,
         trace_id: str | None = None,
-    ) -> BayseResponse[Any]:
+    ) -> BayseResponse[ListTradesResponse]:
         """GET /v1/pm/trades — get trades."""
-        return await self._request(
+        resp = await self._request(
             "GET",
             "/v1/pm/trades",
             params=params,
             auth_level="read",
             trace_id=trace_id,
+        )
+        parsed = ListTradesResponse.model_validate(resp.data)
+        return BayseResponse(
+            status_code=resp.status_code,
+            data=parsed,
+            timestamp=resp.timestamp,
+            headers=resp.headers,
+            trace_id=resp.trace_id,
         )
 
     # ── Activities ──────────────────────────────────────────────────────
@@ -559,14 +882,35 @@ class BayseClient:
     async def get_activities(
         self,
         *,
-        params: dict[str, Any] | None = None,
+        type: str | None = None,
+        page: int = 1,
+        size: int = 20,
         trace_id: str | None = None,
-    ) -> BayseResponse[Any]:
-        """GET /v1/pm/activities — get account activities."""
-        return await self._request(
+    ) -> BayseResponse[ListActivitiesResponse]:
+        """GET /v1/pm/activities — get account activities.
+
+        Args:
+            type: Filter by activity category (``"buys"``, ``"sells"``, ``"limits"``, ``"payout"``).
+            page: Page number (default 1).
+            size: Items per page (default 20).
+            trace_id: Optional trace ID override.
+        """
+        params: dict[str, Any] = {"page": page, "size": size}
+        if type is not None:
+            params["type"] = type
+
+        resp = await self._request(
             "GET",
             "/v1/pm/activities",
             params=params,
             auth_level="read",
             trace_id=trace_id,
+        )
+        parsed = ListActivitiesResponse.model_validate(resp.data)
+        return BayseResponse(
+            status_code=resp.status_code,
+            data=parsed,
+            timestamp=resp.timestamp,
+            headers=resp.headers,
+            trace_id=resp.trace_id,
         )

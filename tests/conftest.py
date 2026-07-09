@@ -45,6 +45,7 @@ def sample_portfolio_response() -> dict:
                 "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                 "outcome": "YES",
                 "outcomeId": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+                "assetId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                 "balance": 138.21,
                 "availableBalance": 138.21,
                 "averagePrice": 0.7235,
@@ -54,6 +55,7 @@ def sample_portfolio_response() -> dict:
                 "payoutIfOutcomeWins": 138.21,
                 "percentageChange": 7.60,
                 "currency": "USD",
+                "userId": "9a8b7c6d-5e4f-3210-abcd-ef1234567890",
                 "market": {
                     "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
                     "title": "Will Super Eagles qualify?",

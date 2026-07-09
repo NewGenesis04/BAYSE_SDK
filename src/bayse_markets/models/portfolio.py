@@ -21,6 +21,9 @@ class PortfolioMarket(BaseModel):
 
     id: str
     title: str
+    image_url: str | None = Field(default=None, alias="imageUrl")
+    outcome1_id: str | None = Field(default=None, alias="outcome1Id")
+    outcome2_id: str | None = Field(default=None, alias="outcome2Id")
     event: PortfolioMarketEvent
 
 
@@ -30,6 +33,7 @@ class OutcomeBalance(BaseModel):
     id: str
     outcome: str
     outcome_id: str = Field(alias="outcomeId")
+    asset_id: str = Field(alias="assetId")
     balance: float
     available_balance: float = Field(alias="availableBalance")
     average_price: float = Field(alias="averagePrice")
@@ -39,6 +43,7 @@ class OutcomeBalance(BaseModel):
     payout_if_outcome_wins: float = Field(alias="payoutIfOutcomeWins")
     percentage_change: float = Field(alias="percentageChange")
     currency: str
+    user_id: str = Field(alias="userId")
     market: PortfolioMarket
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")
