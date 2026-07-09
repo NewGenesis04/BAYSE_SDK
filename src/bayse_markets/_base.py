@@ -4,8 +4,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TypeVar
 
-from pydantic import BaseModel
-
 T = TypeVar("T")
 
 
@@ -18,22 +16,3 @@ class BayseResponse[T]:
     timestamp: datetime
     headers: dict[str, str] = field(default_factory=dict)
     trace_id: str | None = None
-
-
-class PaginationMeta(BaseModel):
-    """Pagination metadata returned by list endpoints."""
-
-    page: int
-    size: int
-    lastPage: int
-    totalCount: int
-
-
-DataT = TypeVar("DataT")
-
-
-class PaginatedResponse[DataT](BaseModel):
-    """Generic wrapper for paginated list responses."""
-
-    data: list[DataT]
-    pagination: PaginationMeta

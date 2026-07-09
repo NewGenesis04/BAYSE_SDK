@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class Asset(BaseModel):
@@ -8,4 +8,4 @@ class Asset(BaseModel):
 
     currency: str
     balance: float
-    availableBalance: float
+    available_balance: float = Field(alias="availableBalance")

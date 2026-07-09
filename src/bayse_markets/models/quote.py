@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class Quote(BaseModel):
@@ -10,5 +10,5 @@ class Quote(BaseModel):
     shares: float
     fees: float
     price: float | None = None
-    profitEstimate: float | None = None
+    profit_estimate: float | None = Field(default=None, alias="profitEstimate")
     currency: str | None = None

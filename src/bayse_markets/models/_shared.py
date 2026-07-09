@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 DataT = TypeVar("DataT")
 
@@ -13,8 +13,8 @@ class PaginationMeta(BaseModel):
 
     page: int
     size: int
-    lastPage: int
-    totalCount: int
+    last_page: int = Field(alias="lastPage")
+    total_count: int = Field(alias="totalCount")
 
 
 class PaginatedResponse[DataT](BaseModel):

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class Activity(BaseModel):
@@ -13,6 +13,6 @@ class Activity(BaseModel):
     description: str | None = None
     amount: float | None = None
     currency: str | None = None
-    eventId: str | None = None
-    marketId: str | None = None
-    createdAt: datetime
+    event_id: str | None = Field(default=None, alias="eventId")
+    market_id: str | None = Field(default=None, alias="marketId")
+    created_at: datetime = Field(alias="createdAt")

@@ -13,11 +13,11 @@ class MintRequest(BaseModel):
 class MintResponse(BaseModel):
     """Response from ``POST /v1/pm/markets/{marketId}/mint``."""
 
-    operationId: str
-    marketId: str
+    operation_id: str = Field(alias="operationId")
+    market_id: str = Field(alias="marketId")
     quantity: float
-    outcome1Price: float
-    outcome2Price: float
+    outcome1_price: float = Field(alias="outcome1Price")
+    outcome2_price: float = Field(alias="outcome2Price")
 
 
 class BurnRequest(BaseModel):
@@ -30,9 +30,9 @@ class BurnRequest(BaseModel):
 class BurnResponse(BaseModel):
     """Response from ``POST /v1/pm/markets/{marketId}/burn``."""
 
-    operationId: str
-    marketId: str
+    operation_id: str = Field(alias="operationId")
+    market_id: str = Field(alias="marketId")
     quantity: float
-    outcome1Price: float
-    outcome2Price: float
+    outcome1_price: float = Field(alias="outcome1Price")
+    outcome2_price: float = Field(alias="outcome2Price")
     proceeds: float

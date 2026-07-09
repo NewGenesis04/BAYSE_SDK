@@ -2,15 +2,15 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class Trade(BaseModel):
     """A single trade execution."""
 
     id: str
-    eventId: str
-    marketId: str
+    event_id: str = Field(alias="eventId")
+    market_id: str = Field(alias="marketId")
     outcome: str
     side: str
     price: float

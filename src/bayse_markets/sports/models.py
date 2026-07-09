@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class SportsLeague(BaseModel):
@@ -18,20 +18,20 @@ class SportsTeam(BaseModel):
     id: str
     name: str
     abbreviation: str | None = None
-    leagueId: str | None = None
-    logoUrl: str | None = None
+    league_id: str | None = Field(default=None, alias="leagueId")
+    logo_url: str | None = Field(default=None, alias="logoUrl")
 
 
 class SportsGame(BaseModel):
     """A sports game/match."""
 
     id: str
-    leagueId: str
-    homeTeamId: str
-    awayTeamId: str
-    homeTeamName: str | None = None
-    awayTeamName: str | None = None
-    startTime: str | None = None
+    league_id: str = Field(alias="leagueId")
+    home_team_id: str = Field(alias="homeTeamId")
+    away_team_id: str = Field(alias="awayTeamId")
+    home_team_name: str | None = Field(default=None, alias="homeTeamName")
+    away_team_name: str | None = Field(default=None, alias="awayTeamName")
+    start_time: str | None = Field(default=None, alias="startTime")
     status: str | None = None
-    homeScore: int | None = None
-    awayScore: int | None = None
+    home_score: int | None = Field(default=None, alias="homeScore")
+    away_score: int | None = Field(default=None, alias="awayScore")

@@ -10,17 +10,17 @@ class Order(BaseModel):
     """A prediction market order."""
 
     id: str
-    eventId: str
-    marketId: str
+    event_id: str = Field(alias="eventId")
+    market_id: str = Field(alias="marketId")
     side: str
     outcome: str
     amount: float
     currency: str
     price: float | None = None
     status: str
-    filledAmount: float | None = None
-    remainingAmount: float | None = None
+    filled_amount: float | None = Field(default=None, alias="filledAmount")
+    remaining_amount: float | None = Field(default=None, alias="remainingAmount")
     type: str | None = None
-    createdAt: datetime | None = None
-    updatedAt: datetime | None = None
+    created_at: datetime | None = Field(default=None, alias="createdAt")
+    updated_at: datetime | None = Field(default=None, alias="updatedAt")
     metadata: dict[str, Any] = Field(default_factory=dict)

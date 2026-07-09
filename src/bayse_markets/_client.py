@@ -20,6 +20,7 @@ from bayse_markets.exceptions import (
     NetworkError,
     error_from_response,
 )
+from bayse_markets.models.event import Event, LeanEvent, ListEventSeriesResponse, ListEventsResponse
 
 log = get_logger()
 
@@ -227,29 +228,154 @@ class BayseClient:
         *,
         page: int = 1,
         size: int = 20,
+        category: str | None = None,
+        subcategory: str | None = None,
+        status: str | None = None,
+        keyword: str | None = None,
+        currency: str | None = None,
+        trending: bool | None = None,
+        watchlist: bool | None = None,
+        series_slug: str | None = None,
+        sport_game_slug: str | None = None,
         trace_id: str | None = None,
-    ) -> BayseResponse[Any]:
+    ) -> BayseResponse[ListEventsResponse]:
         """GET /v1/pm/events — list prediction market events."""
-        return await self._request(
+        params: dict[str, Any] = {"page": page, "size": size}
+        if category is not None:
+            params["category"] = category
+        if subcategory is not None:
+            params["subcategory"] = subcategory
+        if status is not None:
+            params["status"] = status
+        if keyword is not None:
+            params["keyword"] = keyword
+        if currency is not None:
+            params["currency"] = currency
+        if trending is not None:
+            params["trending"] = str(trending).lower()
+        if watchlist is not None:
+            params["watchlist"] = str(watchlist).lower()
+        if series_slug is not None:
+            params["seriesSlug"] = series_slug
+        if sport_game_slug is not None:
+            params["sportGameSlug"] = sport_game_slug
+
+        resp = await self._request(
             "GET",
             "/v1/pm/events",
-            params={"page": page, "size": size},
+            params=params,
             auth_level="read",
             trace_id=trace_id,
+        )
+        parsed = ListEventsResponse.model_validate(resp.data)
+        return BayseResponse(
+            status_code=resp.status_code,
+            data=parsed,
+            timestamp=resp.timestamp,
+            headers=resp.headers,
+            trace_id=resp.trace_id,
         )
 
     async def get_event(
         self,
         event_id: str,
         *,
+        currency: str | None = None,
         trace_id: str | None = None,
-    ) -> BayseResponse[Any]:
+    ) -> BayseResponse[Event]:
         """GET /v1/pm/events/{eventId} — get a single event."""
-        return await self._request(
+        params: dict[str, Any] = {}
+        if currency is not None:
+            params["currency"] = currency
+
+        resp = await self._request(
             "GET",
             f"/v1/pm/events/{event_id}",
+            params=params,
             auth_level="read",
             trace_id=trace_id,
+        )
+        parsed = Event.model_validate(resp.data)
+        return BayseResponse(
+            status_code=resp.status_code,
+            data=parsed,
+            timestamp=resp.timestamp,
+            headers=resp.headers,
+            trace_id=resp.trace_id,
+        )
+
+    async def get_event_by_slug(
+        self,
+        slug: str,
+        *,
+        currency: str | None = None,
+        trace_id: str | None = None,
+    ) -> BayseResponse[Event]:
+        """GET /v1/pm/events/slug/{slug} — get a single event by slug."""
+        params: dict[str, Any] = {}
+        if currency is not None:
+            params["currency"] = currency
+
+        resp = await self._request(
+            "GET",
+            f"/v1/pm/events/slug/{slug}",
+            params=params,
+            auth_level="read",
+            trace_id=trace_id,
+        )
+        parsed = Event.model_validate(resp.data)
+        return BayseResponse(
+            status_code=resp.status_code,
+            data=parsed,
+            timestamp=resp.timestamp,
+            headers=resp.headers,
+            trace_id=resp.trace_id,
+        )
+
+    async def list_event_series(
+        self,
+        *,
+        page: int = 1,
+        size: int = 50,
+        trace_id: str | None = None,
+    ) -> BayseResponse[ListEventSeriesResponse]:
+        """GET /v1/pm/events/series — list event series."""
+        resp = await self._request(
+            "GET",
+            "/v1/pm/events/series",
+            params={"page": page, "size": size},
+            auth_level="public",
+            trace_id=trace_id,
+        )
+        parsed = ListEventSeriesResponse.model_validate(resp.data)
+        return BayseResponse(
+            status_code=resp.status_code,
+            data=parsed,
+            timestamp=resp.timestamp,
+            headers=resp.headers,
+            trace_id=resp.trace_id,
+        )
+
+    async def get_lean_events(
+        self,
+        series_slug: str,
+        *,
+        trace_id: str | None = None,
+    ) -> BayseResponse[list[LeanEvent]]:
+        """GET /v1/pm/events/series/{seriesSlug}/lean-events — get lean events for a series."""
+        resp = await self._request(
+            "GET",
+            f"/v1/pm/events/series/{series_slug}/lean-events",
+            auth_level="public",
+            trace_id=trace_id,
+        )
+        parsed = [LeanEvent.model_validate(item) for item in resp.data]
+        return BayseResponse(
+            status_code=resp.status_code,
+            data=parsed,
+            timestamp=resp.timestamp,
+            headers=resp.headers,
+            trace_id=resp.trace_id,
         )
 
     # ── Quoting ─────────────────────────────────────────────────────────
