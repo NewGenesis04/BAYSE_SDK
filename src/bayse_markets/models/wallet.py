@@ -4,8 +4,6 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from bayse_markets.models._shared import PaginationMeta
-
 
 class AssetAddress(BaseModel):
     """A deposit address for an asset."""
@@ -37,7 +35,6 @@ class Asset(BaseModel):
 
 
 class ListAssetsResponse(BaseModel):
-    """Wrapper for the paginated wallet assets response."""
+    """Wrapper for the wallet assets response."""
 
     assets: list[Asset]
-    pagination: PaginationMeta

@@ -12,6 +12,17 @@ async def list_rewards(
     size: int = 20,
     trace_id: str | None = None,
 ) -> BayseResponse[ListRewardsResponse]:
+    """Get paginated history of completed liquidity reward epoch payouts.
+
+    Args:
+        client: An open ``BayseClient`` instance.
+        page: Page number (default 1).
+        size: Items per page (default 20).
+        trace_id: Optional trace ID for request correlation.
+
+    Returns:
+        Response containing paginated reward payout history.
+    """
     resp = await client._request(
         "GET",
         "/v1/pm/liquidity-rewards",
@@ -34,6 +45,15 @@ async def get_active_rewards(
     *,
     trace_id: str | None = None,
 ) -> BayseResponse[ActiveRewardsResponse]:
+    """Get in-progress liquidity reward accumulation across active epochs.
+
+    Args:
+        client: An open ``BayseClient`` instance.
+        trace_id: Optional trace ID for request correlation.
+
+    Returns:
+        Response containing active reward estimates.
+    """
     resp = await client._request(
         "GET",
         "/v1/pm/liquidity-rewards/active",

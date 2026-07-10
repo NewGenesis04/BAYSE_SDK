@@ -1,6 +1,17 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class QuoteRequest(BaseModel):
+    """Request body for getting a price quote."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    side: str
+    outcome_id: str = Field(alias="outcomeId")
+    amount: float
+    currency: str = "USD"
 
 
 class Quote(BaseModel):

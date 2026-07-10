@@ -2,9 +2,27 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from bayse_markets.models._shared import PaginationMeta
+
+
+class PlaceOrderRequest(BaseModel):
+    """Request body for placing an order."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    side: str
+    outcome_id: str = Field(alias="outcomeId")
+    amount: float
+    order_type: str = Field(alias="type")
+    currency: str = "USD"
+    price: float | None = None
+    time_in_force: str | None = Field(default=None, alias="timeInForce")
+    post_only: bool | None = Field(default=None, alias="postOnly")
+    stp_mode: str | None = Field(default=None, alias="stpMode")
+    max_slippage: float | None = Field(default=None, alias="maxSlippage")
+    expires_at: str | None = Field(default=None, alias="expiresAt")
 
 
 class Order(BaseModel):

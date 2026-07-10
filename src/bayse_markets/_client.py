@@ -14,7 +14,7 @@ from bayse_markets._config import (
     TraceConfig,
     base_url_for,
 )
-from bayse_markets._logging import get_logger, redact_headers
+from bayse_markets._logging import get_logger
 from bayse_markets._retry import RetryStrategy
 from bayse_markets.exceptions import (
     NetworkError,
@@ -29,13 +29,14 @@ from bayse_markets.models.order import (
     CancelOrderResponse,
     ListOrdersResponse,
     Order,
+    PlaceOrderRequest,
     PlaceOrderResponse,
 )
 from bayse_markets.models.order_book import OrderBook
 from bayse_markets.models.pnl import PnLResponse
 from bayse_markets.models.portfolio import PortfolioResponse
 from bayse_markets.models.price_history import PricePoint
-from bayse_markets.models.quote import Quote
+from bayse_markets.models.quote import Quote, QuoteRequest
 from bayse_markets.models.system import HealthResponse, VersionResponse
 from bayse_markets.models.ticker import Ticker
 from bayse_markets.models.trade import ListTradesResponse
@@ -168,14 +169,11 @@ class BayseClient:
         attempt = 0
         while True:
             log.debug(
-                "Request",
-                extra={
-                    "method": method,
-                    "path": path,
-                    "headers": redact_headers(headers),
-                    "trace_id": headers.get("x-trace-id"),
-                    "attempt": attempt + 1,
-                },
+                "Request [%s %s] (attempt %d, trace=%s)",
+                method,
+                path,
+                attempt + 1,
+                headers.get("x-trace-id"),
             )
 
             try:
@@ -198,11 +196,9 @@ class BayseClient:
                 )
 
             log.debug(
-                "Response",
-                extra={
-                    "status": resp.status_code,
-                    "trace_id": resp.headers.get("x-trace-id"),
-                },
+                "Response [%d] (trace=%s)",
+                resp.status_code,
+                resp.headers.get("x-trace-id"),
             )
 
             if resp.status_code < 400:
@@ -218,7 +214,7 @@ class BayseClient:
 
             if self._retry.should_retry(attempt, resp.status_code) and attempt < max_retries:
                 delay = self._retry.delay(attempt)
-                log.debug("Retrying", extra={"attempt": attempt + 1, "delay": delay})
+                log.debug("Retrying (attempt %d, delay=%.2fs)", attempt + 1, delay)
                 await asyncio.sleep(delay)
                 attempt += 1
                 continue
@@ -237,7 +233,14 @@ class BayseClient:
     # ── System ──────────────────────────────────────────────────────────
 
     async def health(self, *, trace_id: str | None = None) -> BayseResponse[HealthResponse]:
-        """GET /health — check API health."""
+        """Check if the API is running.
+
+        Args:
+            trace_id: Optional trace ID for request correlation.
+
+        Returns:
+            Response indicating API health status.
+        """
         resp = await self._request("GET", "/health", auth_level="public", trace_id=trace_id)
         parsed = HealthResponse.model_validate(resp.data)
         return BayseResponse(
@@ -249,7 +252,14 @@ class BayseClient:
         )
 
     async def version(self, *, trace_id: str | None = None) -> BayseResponse[VersionResponse]:
-        """GET /version — get API version."""
+        """Get the current deployed API version.
+
+        Args:
+            trace_id: Optional trace ID for request correlation.
+
+        Returns:
+            Response containing the deployed version string.
+        """
         resp = await self._request("GET", "/version", auth_level="public", trace_id=trace_id)
         parsed = VersionResponse.model_validate(resp.data)
         return BayseResponse(
@@ -278,7 +288,28 @@ class BayseClient:
         sport_game_slug: str | None = None,
         trace_id: str | None = None,
     ) -> BayseResponse[ListEventsResponse]:
-        """GET /v1/pm/events — list prediction market events."""
+        """Get a paginated list of prediction market events.
+
+        Supports filtering by category, status, keyword, currency,
+        trending, watchlist, series slug, and sport game slug.
+
+        Args:
+            page: Page number (default 1).
+            size: Results per page (default 20).
+            category: Filter by event category.
+            subcategory: Filter by event subcategory.
+            status: Filter by event status.
+            keyword: Search keyword.
+            currency: ``"USD"`` or ``"NGN"``.
+            trending: Filter to trending events.
+            watchlist: Filter to watchlist events.
+            series_slug: Filter by event series slug.
+            sport_game_slug: Filter by sport game slug.
+            trace_id: Optional trace ID for request correlation.
+
+        Returns:
+            Response containing a paginated list of events.
+        """
         params: dict[str, Any] = {"page": page, "size": size}
         if category is not None:
             params["category"] = category
@@ -322,7 +353,16 @@ class BayseClient:
         currency: str | None = None,
         trace_id: str | None = None,
     ) -> BayseResponse[Event]:
-        """GET /v1/pm/events/{eventId} — get a single event."""
+        """Get a single prediction market event by ID.
+
+        Args:
+            event_id: UUID of the event.
+            currency: ``"USD"`` or ``"NGN"`` for price display.
+            trace_id: Optional trace ID for request correlation.
+
+        Returns:
+            Response containing the event details.
+        """
         params: dict[str, Any] = {}
         if currency is not None:
             params["currency"] = currency
@@ -350,7 +390,16 @@ class BayseClient:
         currency: str | None = None,
         trace_id: str | None = None,
     ) -> BayseResponse[Event]:
-        """GET /v1/pm/events/slug/{slug} — get a single event by slug."""
+        """Get a single prediction market event by its slug.
+
+        Args:
+            slug: Event slug (URL-friendly identifier).
+            currency: ``"USD"`` or ``"NGN"`` for price display.
+            trace_id: Optional trace ID for request correlation.
+
+        Returns:
+            Response containing the event details.
+        """
         params: dict[str, Any] = {}
         if currency is not None:
             params["currency"] = currency
@@ -378,7 +427,16 @@ class BayseClient:
         size: int = 50,
         trace_id: str | None = None,
     ) -> BayseResponse[ListEventSeriesResponse]:
-        """GET /v1/pm/events/series — list event series."""
+        """Get a paginated list of event series.
+
+        Args:
+            page: Page number (default 1).
+            size: Results per page, max 100 (default 50).
+            trace_id: Optional trace ID for request correlation.
+
+        Returns:
+            Response containing a paginated list of event series.
+        """
         resp = await self._request(
             "GET",
             "/v1/pm/events/series",
@@ -401,7 +459,15 @@ class BayseClient:
         *,
         trace_id: str | None = None,
     ) -> BayseResponse[list[LeanEvent]]:
-        """GET /v1/pm/events/series/{seriesSlug}/lean-events — get lean events for a series."""
+        """Get a lightweight list of events belonging to a series.
+
+        Args:
+            series_slug: Slug of the event series.
+            trace_id: Optional trace ID for request correlation.
+
+        Returns:
+            Response containing a list of lean event summaries.
+        """
         resp = await self._request(
             "GET",
             f"/v1/pm/events/series/{series_slug}/lean-events",
@@ -424,10 +490,35 @@ class BayseClient:
         event_id: str,
         market_id: str,
         *,
-        body: dict[str, Any],
+        side: str,
+        outcome_id: str,
+        amount: float,
+        currency: str = "USD",
         trace_id: str | None = None,
     ) -> BayseResponse[Quote]:
-        """POST /v1/pm/events/{eventId}/markets/{marketId}/quote — get a quote."""
+        """Get a price quote before placing an order.
+
+        Returns the expected cost, shares, fees, and price impact for a
+        potential trade without committing to it.
+
+        Args:
+            event_id: UUID of the event.
+            market_id: UUID of the market.
+            side: ``"BUY"`` or ``"SELL"``.
+            outcome_id: UUID of the outcome.
+            amount: Amount to spend (buy) or receive (sell).
+            currency: ``"USD"`` (default) or ``"NGN"``.
+            trace_id: Optional trace ID for request correlation.
+
+        Returns:
+            Response containing the quote details.
+        """
+        body = QuoteRequest(
+            side=side,
+            outcome_id=outcome_id,
+            amount=amount,
+            currency=currency,
+        ).model_dump(by_alias=True, mode="json")
         resp = await self._request(
             "POST",
             f"/v1/pm/events/{event_id}/markets/{market_id}/quote",
@@ -451,11 +542,55 @@ class BayseClient:
         event_id: str,
         market_id: str,
         *,
-        body: dict[str, Any],
+        side: str,
+        outcome_id: str,
+        amount: float,
+        order_type: str,
+        currency: str = "USD",
+        price: float | None = None,
+        time_in_force: str | None = None,
+        post_only: bool | None = None,
+        stp_mode: str | None = None,
+        max_slippage: float | None = None,
+        expires_at: str | None = None,
         trace_id: str | None = None,
         max_retries: int | None = None,
     ) -> BayseResponse[PlaceOrderResponse]:
-        """POST /v1/pm/events/{eventId}/markets/{marketId}/orders — place an order."""
+        """Place a buy or sell order on a prediction market.
+
+        Args:
+            event_id: UUID of the event.
+            market_id: UUID of the market.
+            side: ``"BUY"`` or ``"SELL"``.
+            outcome_id: UUID of the outcome.
+            amount: Amount to spend (buy) or receive (sell).
+            order_type: ``"LIMIT"`` or ``"MARKET"``.
+            currency: ``"USD"`` (default) or ``"NGN"``.
+            price: Limit price (required for ``LIMIT`` orders).
+            time_in_force: ``"GTC"``, ``"GTD"``, ``"FAK"``, or ``"FOK"``.
+            post_only: Whether to reject instead of crossing the spread.
+            stp_mode: Self-trade prevention mode for CLOB markets.
+            max_slippage: Max acceptable slippage for market orders.
+            expires_at: ISO 8601 expiration (required for ``GTD``).
+            trace_id: Optional trace ID for request correlation.
+            max_retries: Max retries for idempotent retries on 5xx.
+
+        Returns:
+            Response containing the placed order details.
+        """
+        body = PlaceOrderRequest(
+            side=side,
+            outcome_id=outcome_id,
+            amount=amount,
+            order_type=order_type,
+            currency=currency,
+            price=price,
+            time_in_force=time_in_force,
+            post_only=post_only,
+            stp_mode=stp_mode,
+            max_slippage=max_slippage,
+            expires_at=expires_at,
+        ).model_dump(by_alias=True, mode="json", exclude_none=True)
         resp = await self._request(
             "POST",
             f"/v1/pm/events/{event_id}/markets/{market_id}/orders",
@@ -486,7 +621,25 @@ class BayseClient:
         size: int = 20,
         trace_id: str | None = None,
     ) -> BayseResponse[ListOrdersResponse]:
-        """GET /v1/pm/orders — list orders."""
+        """Get a paginated list of your orders.
+
+        Supports filtering by side, status, event, market, outcome,
+        and currency.
+
+        Args:
+            side: Filter by side (``"BUY"`` or ``"SELL"``).
+            status: Filter by status (``"open"``, ``"filled"``, etc.).
+            event_id: Filter by event UUID.
+            market_id: Filter by market UUID.
+            outcome_id: Filter by outcome UUID.
+            currency: Filter by currency (``"USD"`` or ``"NGN"``).
+            page: Page number (default 1).
+            size: Results per page (default 20).
+            trace_id: Optional trace ID for request correlation.
+
+        Returns:
+            Response containing a paginated list of orders.
+        """
         params: dict[str, Any] = {"page": page, "size": size}
         if side is not None:
             params["side"] = side
@@ -522,7 +675,15 @@ class BayseClient:
         *,
         trace_id: str | None = None,
     ) -> BayseResponse[Order]:
-        """GET /v1/pm/orders/{orderId} — get a single order."""
+        """Get details of a specific order by ID.
+
+        Args:
+            order_id: UUID of the order.
+            trace_id: Optional trace ID for request correlation.
+
+        Returns:
+            Response containing the order details.
+        """
         resp = await self._request(
             "GET",
             f"/v1/pm/orders/{order_id}",
@@ -545,7 +706,19 @@ class BayseClient:
         trace_id: str | None = None,
         max_retries: int | None = None,
     ) -> BayseResponse[CancelOrderResponse]:
-        """DELETE /v1/pm/orders/{orderId} — cancel an order."""
+        """Cancel an open or partially filled order.
+
+        .. warning::
+            This is an authenticated write operation.
+
+        Args:
+            order_id: UUID of the order to cancel.
+            trace_id: Optional trace ID for request correlation.
+            max_retries: Max retries for idempotent retries on 5xx.
+
+        Returns:
+            Response confirming the cancellation.
+        """
         resp = await self._request(
             "DELETE",
             f"/v1/pm/orders/{order_id}",
@@ -572,7 +745,23 @@ class BayseClient:
         trace_id: str | None = None,
         max_retries: int | None = None,
     ) -> BayseResponse[BatchPlaceResponse]:
-        """POST /v1/pm/orders/batch — place up to 20 orders in one round-trip."""
+        """Place up to 20 CLOB orders across one or more markets.
+
+        The ``body`` must contain an ``orders`` array. Each order spec
+        uses API field names (``marketId``, ``side``, ``outcomeId``, etc.).
+
+        .. warning::
+            This is an authenticated write operation.
+
+        Args:
+            body: Batch order payload with ``orders`` array.
+            idempotency_key: Optional key for idempotent retries.
+            trace_id: Optional trace ID for request correlation.
+            max_retries: Max retries for idempotent retries on 5xx.
+
+        Returns:
+            Response containing batch placement results.
+        """
         headers: dict[str, str] = {}
         if idempotency_key is not None:
             headers["Idempotency-Key"] = idempotency_key
@@ -603,7 +792,23 @@ class BayseClient:
         trace_id: str | None = None,
         max_retries: int | None = None,
     ) -> BayseResponse[BatchAmendResponse]:
-        """POST /v1/pm/orders/batch/amend — modify price/size of up to 20 orders."""
+        """Modify the price or size of up to 20 open CLOB orders.
+
+        The ``body`` must contain an ``orders`` array with order IDs
+        and updated fields.
+
+        .. warning::
+            This is an authenticated write operation.
+
+        Args:
+            body: Batch amend payload with ``orders`` array.
+            idempotency_key: Optional key for idempotent retries.
+            trace_id: Optional trace ID for request correlation.
+            max_retries: Max retries for idempotent retries on 5xx.
+
+        Returns:
+            Response containing batch amend results.
+        """
         headers: dict[str, str] = {}
         if idempotency_key is not None:
             headers["Idempotency-Key"] = idempotency_key
@@ -634,7 +839,22 @@ class BayseClient:
         trace_id: str | None = None,
         max_retries: int | None = None,
     ) -> BayseResponse[BatchCancelResponse]:
-        """DELETE /v1/pm/orders/batch — cancel up to 100 orders in one round-trip."""
+        """Cancel up to 100 CLOB orders across one or more markets.
+
+        The ``body`` must contain an ``orderIds`` array.
+
+        .. warning::
+            This is an authenticated write operation.
+
+        Args:
+            body: Batch cancel payload with ``orderIds`` array.
+            idempotency_key: Optional key for idempotent retries.
+            trace_id: Optional trace ID for request correlation.
+            max_retries: Max retries for idempotent retries on 5xx.
+
+        Returns:
+            Response containing batch cancellation results.
+        """
         headers: dict[str, str] = {}
         if idempotency_key is not None:
             headers["Idempotency-Key"] = idempotency_key
@@ -664,7 +884,17 @@ class BayseClient:
         *,
         trace_id: str | None = None,
     ) -> BayseResponse[PortfolioResponse]:
-        """GET /v1/pm/portfolio — get portfolio."""
+        """Get your current positions across all markets.
+
+        Returns outcome balances, market details, and total portfolio
+        value for the authenticated user.
+
+        Args:
+            trace_id: Optional trace ID for request correlation.
+
+        Returns:
+            Response containing portfolio positions.
+        """
         resp = await self._request(
             "GET",
             "/v1/pm/portfolio",
@@ -692,7 +922,22 @@ class BayseClient:
         breakdown: bool = False,
         trace_id: str | None = None,
     ) -> BayseResponse[PnLResponse]:
-        """GET /v1/pm/pnl — get realized profit and loss."""
+        """Get your realized profit and loss over a time period.
+
+        Supports rolling windows (``"1M"``, ``"24H"``, etc.),
+        calendar windows (``"THIS_WEEK"``), or custom date ranges.
+
+        Args:
+            time_period: Rolling (``"1M"``) or calendar window.
+            start: Custom start time (ISO 8601). Paired with ``end``.
+            end: Custom end time (ISO 8601). Paired with ``start``.
+            currency: ``"USD"`` (default) or ``"NGN"``.
+            breakdown: Include per-event breakdown (default ``False``).
+            trace_id: Optional trace ID for request correlation.
+
+        Returns:
+            Response containing realized PnL data.
+        """
         params: dict[str, Any] = {}
         if time_period is not None:
             params["timePeriod"] = time_period
@@ -728,7 +973,17 @@ class BayseClient:
         *,
         trace_id: str | None = None,
     ) -> BayseResponse[ListAssetsResponse]:
-        """GET /v1/wallet/assets — get wallet assets."""
+        """Get wallet assets and balances for the authenticated user.
+
+        Returns all currency assets including available and pending
+        balances, deposit/withdrawal addresses, and per-asset network info.
+
+        Args:
+            trace_id: Optional trace ID for request correlation.
+
+        Returns:
+            Response containing wallet assets with balances.
+        """
         resp = await self._request(
             "GET",
             "/v1/wallet/assets",
@@ -755,7 +1010,21 @@ class BayseClient:
         outcome: str | None = None,
         trace_id: str | None = None,
     ) -> BayseResponse[dict[str, list[PricePoint]]]:
-        """GET /v1/pm/events/{eventId}/price-history — get price history."""
+        """Get historical price data for a prediction market event.
+
+        Returns a map of market IDs to arrays of price points. No
+        authentication required.
+
+        Args:
+            event_id: UUID of the event.
+            time_period: Time window (``"24H"`` default, ``"1W"``, ``"1M"``, etc.).
+            market_ids: Filter to specific market UUIDs.
+            outcome: Filter to a specific outcome (``"YES"`` or ``"NO"``).
+            trace_id: Optional trace ID for request correlation.
+
+        Returns:
+            Response mapping market IDs to lists of historical price points.
+        """
         params: dict[str, Any] = {"timePeriod": time_period}
         if market_ids is not None:
             params["marketId[]"] = ",".join(market_ids)
@@ -789,13 +1058,19 @@ class BayseClient:
         currency: str = "USD",
         trace_id: str | None = None,
     ) -> BayseResponse[list[OrderBook]]:
-        """GET /v1/pm/books — get order books for one or more outcomes.
+        """Get the live order book for one or more outcomes (CLOB only).
+
+        Returns bids, asks, last traded price, and side for each
+        requested outcome. No authentication required.
 
         Args:
             outcome_ids: One or more outcome UUIDs.
             depth: Number of price levels on each side (default 10).
             currency: Price display currency (default ``"USD"``).
-            trace_id: Optional trace ID override.
+            trace_id: Optional trace ID for request correlation.
+
+        Returns:
+            Response containing order books for the requested outcomes.
         """
         params: dict[str, Any] = {"depth": depth, "currency": currency}
         params["outcomeId[]"] = outcome_ids
@@ -824,13 +1099,18 @@ class BayseClient:
         outcome_id: str | None = None,
         trace_id: str | None = None,
     ) -> BayseResponse[Ticker]:
-        """GET /v1/pm/markets/{marketId}/ticker — get ticker.
+        """Get real-time price and volume statistics for a market outcome.
+
+        Requires either ``outcome`` or ``outcome_id``.
 
         Args:
             market_id: UUID of the market.
             outcome: Outcome label (``"YES"`` or ``"NO"``). Required if ``outcome_id`` not provided.
             outcome_id: UUID of the outcome. Required if ``outcome`` not provided.
-            trace_id: Optional trace ID override.
+            trace_id: Optional trace ID for request correlation.
+
+        Returns:
+            Response containing ticker data for the requested outcome.
         """
         params: dict[str, Any] = {}
         if outcome is not None:
@@ -860,7 +1140,17 @@ class BayseClient:
         params: dict[str, Any] | None = None,
         trace_id: str | None = None,
     ) -> BayseResponse[ListTradesResponse]:
-        """GET /v1/pm/trades — get trades."""
+        """Get recent executed trades (CLOB markets only).
+
+        Use query params to filter by market, outcome, or time range.
+
+        Args:
+            params: Query parameters as a dict (``marketId``, ``outcomeId``, etc.).
+            trace_id: Optional trace ID for request correlation.
+
+        Returns:
+            Response containing a list of executed trades.
+        """
         resp = await self._request(
             "GET",
             "/v1/pm/trades",
@@ -887,13 +1177,18 @@ class BayseClient:
         size: int = 20,
         trace_id: str | None = None,
     ) -> BayseResponse[ListActivitiesResponse]:
-        """GET /v1/pm/activities — get account activities.
+        """Get your trading activity history.
+
+        Supports filtering by activity category.
 
         Args:
             type: Filter by activity category (``"buys"``, ``"sells"``, ``"limits"``, ``"payout"``).
             page: Page number (default 1).
             size: Items per page (default 20).
-            trace_id: Optional trace ID override.
+            trace_id: Optional trace ID for request correlation.
+
+        Returns:
+            Response containing a paginated list of activities.
         """
         params: dict[str, Any] = {"page": page, "size": size}
         if type is not None:

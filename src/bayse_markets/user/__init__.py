@@ -6,7 +6,7 @@ import json
 import httpx
 
 from bayse_markets._config import Env, TraceConfig, base_url_for
-from bayse_markets._logging import get_logger, redact_headers
+from bayse_markets._logging import get_logger
 from bayse_markets._retry import RetryConfig, RetryStrategy
 from bayse_markets.exceptions import NetworkError, error_from_response
 from bayse_markets.user.models import (
@@ -105,14 +105,11 @@ class UserClient:
 
         while True:
             log.debug(
-                "UserClient request",
-                extra={
-                    "method": method,
-                    "path": path,
-                    "headers": redact_headers(headers),
-                    "trace_id": trace_id,
-                    "attempt": attempt + 1,
-                },
+                "UserClient request [%s %s] (attempt %d, trace=%s)",
+                method,
+                path,
+                attempt + 1,
+                trace_id,
             )
 
             try:
@@ -132,7 +129,7 @@ class UserClient:
 
             if resp.status_code < 400:
                 data: dict = resp.json()
-                log.debug("UserClient response", extra={"status": resp.status_code, "trace_id": trace_id})
+                log.debug("UserClient response [%d] (trace=%s)", resp.status_code, trace_id)
                 return data
 
             if (
@@ -140,7 +137,7 @@ class UserClient:
                 and attempt < max_retries
             ):
                 delay = self._retry.delay(attempt)
-                log.debug("UserClient retry", extra={"attempt": attempt, "delay": delay})
+                log.debug("UserClient retry (attempt %d, delay=%.2fs)", attempt, delay)
                 await asyncio.sleep(delay)
                 attempt += 1
                 continue
@@ -191,7 +188,13 @@ class UserClient:
         return parsed
 
     async def list_api_keys(self) -> ListApiKeysResponse:
-        """List all active API keys."""
+        """List all active API keys for your account.
+
+        Requires a valid session (call ``login()`` first).
+
+        Returns:
+            Response containing the list of API keys and total count.
+        """
         data = await self._request(
             "GET",
             "/v1/user/me/api-keys",
@@ -200,7 +203,18 @@ class UserClient:
         return ListApiKeysResponse.model_validate(data)
 
     async def revoke_api_key(self, key_id: str) -> RevokeKeyResponse:
-        """Permanently revoke an API key by ID."""
+        """Permanently deactivate an API key.
+
+        .. warning::
+            Revoking a key is permanent. Any requests signed with the
+            revoked key will immediately start returning 401.
+
+        Args:
+            key_id: UUID of the API key to revoke.
+
+        Returns:
+            Response confirming the revocation.
+        """
         data = await self._request(
             "DELETE",
             f"/v1/user/me/api-keys/{key_id}",
@@ -211,7 +225,15 @@ class UserClient:
     async def rotate_api_key(self, key_id: str) -> ApiKey:
         """Generate a new secret key while keeping the same key ID.
 
-        The old secret key stops working immediately.
+        .. warning::
+            The old secret key stops working immediately. Update all
+            services using this key before rotating.
+
+        Args:
+            key_id: UUID of the API key to rotate.
+
+        Returns:
+            Response containing the new secret key (one-time only).
         """
         data = await self._request(
             "POST",
@@ -229,6 +251,13 @@ class UserClient:
         """Resolve a user tag or ID to their public profile.
 
         Provide exactly one of ``tag`` or ``user_id``.
+
+        Args:
+            tag: The user's tag (username). Case-insensitive.
+            user_id: The user's ID (UUID).
+
+        Returns:
+            Response containing the user's public profile.
         """
         params: dict[str, str] = {}
         if tag is not None:

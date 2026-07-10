@@ -15,6 +15,17 @@ async def list_maker_rebates(
     size: int = 20,
     trace_id: str | None = None,
 ) -> BayseResponse[ListMakerRebatesResponse]:
+    """Get paginated history of completed maker rebate epoch payouts.
+
+    Args:
+        client: An open ``BayseClient`` instance.
+        page: Page number (default 1).
+        size: Items per page (default 20).
+        trace_id: Optional trace ID for request correlation.
+
+    Returns:
+        Response containing paginated rebate payout history.
+    """
     resp = await client._request(
         "GET",
         "/v1/pm/maker-rebates",
@@ -37,6 +48,15 @@ async def get_active_maker_rebates(
     *,
     trace_id: str | None = None,
 ) -> BayseResponse[ActiveMakerRebatesResponse]:
+    """Get in-progress maker rebate accumulation across active epochs.
+
+    Args:
+        client: An open ``BayseClient`` instance.
+        trace_id: Optional trace ID for request correlation.
+
+    Returns:
+        Response containing active rebate estimates.
+    """
     resp = await client._request(
         "GET",
         "/v1/pm/maker-rebates/active",

@@ -8,3 +8,4 @@ __pycache__/
 dist/
 .pytest__cache/
 .ruff__cache/
+manual_test/

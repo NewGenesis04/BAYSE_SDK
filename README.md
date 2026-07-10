@@ -80,8 +80,11 @@ async with UserClient() as user:
         public_key=key.public_key,
         secret_key=key.secret_key,
     ) as client:
+        wallet = await client.get_assets()
+        for asset in wallet.data.assets:
+            print(f"Wallet balance: {asset.available_balance}")
         portfolio = await client.get_portfolio()
-        print(f"Balance: {portfolio.data.total_balance}")
+        print(f"Balance: {portfolio.data.portfolio_current_value}")
 ```
 
 ---
@@ -94,12 +97,12 @@ async with UserClient() as user:
 order = await client.place_order(
     event_id="evt_...",
     market_id="mkt_...",
-    body={
-        "side": "BUY",
-        "outcome": "YES",
-        "amount": 10000,
-        "currency": "NGN",
-    },
+    side="BUY",
+    outcome_id="outcome_uuid",
+    amount=10000,
+    order_type="LIMIT",
+    price=0.65,
+    currency="NGN",
 )
 print(f"Order {order.data.order.id} — {order.data.order.status}")
 ```
@@ -122,7 +125,10 @@ print(f"{result.data.summary.succeeded} placed, {result.data.summary.failed} fai
 quote = await client.get_quote(
     event_id="evt_...",
     market_id="mkt_...",
-    body={"side": "BUY", "outcome": "YES", "amount": 500, "currency": "USD"},
+    side="BUY",
+    outcome_id="outcome_uuid",
+    amount=500,
+    currency="USD",
 )
 print(f"Price: {quote.data.price}")
 ```
