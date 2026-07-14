@@ -62,7 +62,7 @@ async def list_teams(
 
     Args:
         client: An open ``BayseClient`` instance.
-        league: Filter by league key (e.g. ``"epl"``).
+        league: Filter by league name (e.g. ``"England - Premier League"``).
         sport: Filter by sport (e.g. ``"soccer"``).
         page: Page number (default 1).
         size: Results per page, max 100 (default 50).
@@ -107,7 +107,7 @@ async def list_games(
 
     Args:
         client: An open ``BayseClient`` instance.
-        league: Filter by league key (e.g. ``"epl"``).
+        league: Filter by league name (e.g. ``"England - Premier League"``).
         sport: Filter by sport (e.g. ``"soccer"``).
         page: Page number (default 1).
         size: Results per page, max 100 (default 50).

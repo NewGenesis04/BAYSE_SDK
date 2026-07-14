@@ -11,7 +11,7 @@ class SportsLeague(BaseModel):
     """A sports league."""
 
     name: str
-    key: str
+    key: str | None = None
     short_name: str = Field(alias="shortName")
     image_url: str = Field(alias="imageUrl")
 

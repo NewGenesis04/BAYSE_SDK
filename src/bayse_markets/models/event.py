@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from typing import Any
+
+from pydantic import BaseModel, Field, field_validator
 
 from bayse_markets.models._shared import PaginationMeta
 
@@ -75,6 +77,13 @@ class Event(BaseModel):
     event_close_value: float | None = Field(default=None, alias="eventCloseValue")
     markets: list[EventMarket] = Field(default_factory=list)
 
+    @field_validator("opening_date", "resolution_date", "closing_date", mode="before")
+    @classmethod
+    def _empty_str_to_none(cls, v: Any) -> Any:
+        if v == "":
+            return None
+        return v
+
 
 class ListEventsResponse(BaseModel):
     events: list[Event]
@@ -104,3 +113,10 @@ class LeanEvent(BaseModel):
     opening_date: datetime | None = Field(default=None, alias="openingDate")
     closing_date: datetime | None = Field(default=None, alias="closingDate")
     resolution_date: datetime | None = Field(default=None, alias="resolutionDate")
+
+    @field_validator("opening_date", "resolution_date", "closing_date", mode="before")
+    @classmethod
+    def _empty_str_to_none(cls, v: Any) -> Any:
+        if v == "":
+            return None
+        return v

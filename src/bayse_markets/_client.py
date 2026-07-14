@@ -120,7 +120,7 @@ class BayseClient:
             "x-trace-id": tid,
         }
 
-        if auth_level in ("read", "write"):
+        if auth_level in ("read", "write") and self._public_key:
             headers["X-Public-Key"] = self._public_key
 
         if auth_level == "write":
@@ -1038,10 +1038,19 @@ class BayseClient:
             auth_level="public",
             trace_id=trace_id,
         )
-        parsed: dict[str, list[PricePoint]] = {
-            market_id: [PricePoint.model_validate(p) for p in points]
-            for market_id, points in resp.data.items()
-        }
+        parsed: dict[str, list[PricePoint]] = {}
+        for m in (resp.data.get("markets") or []):
+            market_id = m["marketId"]
+            outcome = m.get("title", "")
+            pts = []
+            for entry in (m.get("priceHistory") or []):
+                pts.append(PricePoint(
+                    outcome=outcome,
+                    price=entry["p"],
+                    timestamp=datetime.fromtimestamp(entry["e"] / 1000, tz=UTC),
+                ))
+            if pts:
+                parsed[market_id] = pts
         return BayseResponse(
             status_code=resp.status_code,
             data=parsed,
