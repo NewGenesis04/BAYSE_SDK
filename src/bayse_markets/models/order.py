@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from bayse_markets.models._shared import PaginationMeta
 
@@ -30,9 +30,9 @@ class Order(BaseModel):
 
     id: str
     market_id: str = Field(alias="marketId")
-    outcome: str
+    outcome: str = Field(alias="outcomeId")
     side: str
-    order_type: str = Field(alias="orderType")
+    order_type: str = Field(alias="type")
     stp_mode: str = Field(alias="stpMode")
     status: str
     amount: float
@@ -77,9 +77,13 @@ class PlacedOrder(BaseModel):
 
 class PlaceOrderResponse(BaseModel):
     """Response from placing a single order."""
+    model_config = ConfigDict(populate_by_name=True)
 
     engine: str
-    order: PlacedOrder
+    order: PlacedOrder | None = Field(
+        default=None,
+        validation_alias=AliasChoices("clobOrder", "ammOrder", "order"),
+    )
 
 
 class CancelOrderResponse(BaseModel):

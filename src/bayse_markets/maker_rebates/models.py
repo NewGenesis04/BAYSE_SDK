@@ -38,8 +38,8 @@ class ActiveMakerRebate(BaseModel):
 class ListMakerRebatesResponse(BaseModel):
     """Wrapper for the paginated maker rebates list response."""
 
-    data: list[MakerRebate]
-    pagination: PaginationMeta
+    data: list[MakerRebate] | None = None
+    pagination: PaginationMeta | None = None
 
 
 class ActiveMakerRebatesResponse(BaseModel):

@@ -38,8 +38,8 @@ class ActiveLiquidityReward(BaseModel):
 class ListRewardsResponse(BaseModel):
     """Wrapper for the paginated liquidity rewards list response."""
 
-    data: list[LiquidityReward]
-    pagination: PaginationMeta
+    data: list[LiquidityReward] | None = None
+    pagination: PaginationMeta | None = None
 
 
 class ActiveRewardsResponse(BaseModel):

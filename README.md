@@ -1,15 +1,26 @@
 # Bayse Markets Python SDK
 
+`Python 3.12+` · `MIT` · `tests: 73 passing`
+
 Async Python SDK for the [Bayse Markets](https://docs.bayse.markets) prediction market API — fully typed, Pythonic, and covering every endpoint.
+
+> This is an independent, community-built SDK by Ogie Omorose — not built, maintained, or endorsed by Bayse.
 
 ```python
 from bayse_markets import BayseClient
 
 async with BayseClient(public_key="pk_live_...", secret_key="sk_live_...") as client:
     events = await client.list_events(page=1, size=10)
-    for event in events.data.items:
-        print(f"{event.title}: {event.close_time}")
+    for event in events.data.events:
+        print(f"{event.title}: {event.closing_date}")
 ```
+
+## Who this is for
+
+- **App developers** building trading bots, dashboards, or integrations on top of Bayse — full order lifecycle (place, batch, amend, cancel), portfolio, wallet, and activity coverage.
+- **Data scientists & quantitative researchers** — every response is a Pydantic model that drops straight into `pandas` (see [Data Science Quickstart](#data-science-quickstart)) for backtesting, price history analysis, or signal research.
+- **Market makers / liquidity providers** — dedicated `market_maker` (mint/burn), `maker_rebates`, and `rewards` modules for tracking and optimizing liquidity incentives.
+- **Anyone bootstrapping API access** — `UserClient` creates and rotates API keys from just an email/password, no dashboard round-trip required.
 
 ## Install
 
@@ -26,7 +37,7 @@ Requires Python 3.12+.
 ## Key Features
 
 - **100% typed responses** — every endpoint returns `BayseResponse[T]` with proper Pydantic models. No raw dicts.
-- **Pythonic field names** — API `camelCase` fields are mapped to `snake_case`. Write `event.close_time`, not `event["closeTime"]`.
+- **Pythonic field names** — API `camelCase` fields are mapped to `snake_case`. Write `event.closing_date`, not `event["closingDate"]`.
 - **UserClient** — bootstrap API keys programmatically from email + password. No need to visit the web UI.
 - **No auth needed for some endpoints** — price history and order books are public.
 - **Full API coverage** — events, orders (single + batch), quoting, portfolio, PnL, trades, activities, wallet, sports, liquidity rewards, maker rebates, market maker, system health.
@@ -56,8 +67,8 @@ async def main():
             print(f"{balance.market.title}: {balance.outcome} = {balance.balance}")
 
         events = await client.list_events(page=1, size=5)
-        for event in events.data.items:
-            print(f"{event.title} — closes {event.close_time}")
+        for event in events.data.events:
+            print(f"{event.title} — closes {event.closing_date}")
 
 asyncio.run(main())
 ```
@@ -112,12 +123,22 @@ print(f"Order {order.data.order.id} — {order.data.order.status}")
 ```python
 result = await client.batch_place_orders(body={
     "orders": [
-        {"marketId": "...", "side": "BUY", "outcome": "YES", "amount": 5000, "price": 0.65},
-        {"marketId": "...", "side": "SELL", "outcome": "NO", "amount": 3000, "price": 0.30},
+        {
+            "marketId": "...", "side": "BUY", "outcomeId": "outcome_uuid_yes",
+            "amount": 5000, "type": "LIMIT", "price": 0.65, "currency": "USD",
+        },
+        {
+            "marketId": "...", "side": "SELL", "outcomeId": "outcome_uuid_no",
+            "amount": 3000, "type": "LIMIT", "price": 0.30, "currency": "USD",
+        },
     ]
 })
 print(f"{result.data.summary.succeeded} placed, {result.data.summary.failed} failed")
 ```
+
+> Each order is routed by `outcomeId` alone — `marketId` is accepted but not
+> validated, so a mismatched `marketId` won't misroute an order (it's derived
+> from the outcome server-side). Don't rely on it as a safety check.
 
 ### Get a quote
 
@@ -242,6 +263,54 @@ print(f"{profile.tag} — {profile.image_url}")
 
 ---
 
+## Data Science Quickstart
+
+Every response is a Pydantic model, so it drops straight into `pandas` with
+`model_dump()` — no manual JSON wrangling.
+
+### Events into a DataFrame
+
+```python
+import pandas as pd
+from bayse_markets import BayseClient
+
+async with BayseClient(public_key=PK, secret_key=SK) as client:
+    events = await client.list_events(page=1, size=50, status="open")
+    df = pd.DataFrame([e.model_dump() for e in events.data.events])
+    print(df[["title", "category", "total_volume", "liquidity"]].sort_values(
+        "total_volume", ascending=False
+    ).head())
+```
+
+### Plot price history with matplotlib
+
+```python
+import matplotlib.pyplot as plt
+import pandas as pd
+
+history = await client.get_price_history(event_id="evt_...", time_period="1W")
+
+for market_id, points in history.data.items():
+    df = pd.DataFrame([p.model_dump() for p in points])
+    df.plot(x="timestamp", y="price", title=f"Market {market_id}")
+
+plt.show()
+```
+
+### Feed portfolio data into a model
+
+```python
+portfolio = await client.get_portfolio()
+df = pd.DataFrame([b.model_dump() for b in portfolio.data.outcome_balances])
+
+# e.g. total exposure and unrealized P&L per position, ready for
+# whatever sizing/risk logic your strategy uses
+df["unrealized_pnl"] = df["current_value"] - df["cost"]
+print(df[["outcome", "balance", "cost", "current_value", "unrealized_pnl"]])
+```
+
+---
+
 ## Design Notes
 
 **Typed everywhere.** Every endpoint returns `BayseResponse[T]` where `T` is a Pydantic model. No raw dictionaries, no guesswork about field names. Your editor's autocomplete works.
@@ -256,10 +325,10 @@ print(f"{profile.tag} — {profile.image_url}")
 
 ---
 
-## Documentation
-
-Full API reference at [docs.bayse.markets](https://docs.bayse.markets).
-
 ## License
 
-Proprietary.
+MIT — see [LICENSE](LICENSE). This project is unaffiliated with Bayse; "Bayse Markets" refers to the third-party API it wraps.
+
+---
+
+- Full API reference at [docs.bayse.markets](https://docs.bayse.markets).
