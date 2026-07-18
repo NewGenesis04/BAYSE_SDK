@@ -1,6 +1,6 @@
 # Bayse Markets Python SDK
 
-`Python 3.12+` · `MIT` · `tests: 73 passing`
+`Python 3.12+` · `MIT`
 
 Async Python SDK for the [Bayse Markets](https://docs.bayse.markets) prediction market API — fully typed, Pythonic, and covering every endpoint.
 
@@ -42,6 +42,7 @@ Requires Python 3.12+.
 - **No auth needed for some endpoints** — price history and order books are public.
 - **Full API coverage** — events, orders (single + batch), quoting, portfolio, PnL, trades, activities, wallet, sports, liquidity rewards, maker rebates, market maker, system health.
 - **Async only** — built on `httpx` with automatic retries, exponential backoff, and trace IDs.
+- **AI-friendly reference** — [`llms.txt`](llms.txt) at the project root gives AI coding tools a condensed, complete reference for using this SDK.
 
 ---
 
@@ -82,7 +83,7 @@ async with UserClient() as user:
     await user.login("you@example.com", "your-password")
     key = await user.create_api_key("my trading bot")
 
-    # ⚠️ Save these — secret_key is only shown once
+    # Save these — secret_key is only shown once
     print(f"pk={key.public_key}")
     print(f"sk={key.secret_key}")
 
@@ -263,6 +264,80 @@ print(f"{profile.tag} — {profile.image_url}")
 
 ---
 
+## Utilities
+
+Convenience functions that combine or derive data from multiple API calls.
+Import from ``bayse_markets.utils``:
+
+```python
+from bayse_markets.utils import (
+    get_closing_soon,
+    get_high_volume_markets,
+    get_market_summary,
+    get_portfolio_breakdown,
+    get_sector_overview,
+    compare_outcomes,
+    calculate_spread,
+)
+```
+
+**Find events closing in the next 24 hours:**
+
+```python
+closing = await get_closing_soon(client, hours=24, category="sports")
+for event in closing.data:
+    print(f"{event.title} — closes {event.closing_date}")
+```
+
+**Get high-volume events:**
+
+```python
+active = await get_high_volume_markets(client, min_volume=100_000)
+print(f"{len(active.data)} events above 100k volume")
+```
+
+**Consolidated event view (event + all order books):**
+
+```python
+summary = await get_market_summary(client, event_id="evt_...")
+print(f"{summary.data.event.title}: {len(summary.data.order_books)} order books")
+```
+
+**Combined portfolio + wallet:**
+
+```python
+bd = await get_portfolio_breakdown(client)
+print(f"Portfolio: {bd.data.portfolio_current_value}")
+print(f"Wallet assets: {len(bd.data.assets)}")
+```
+
+**Compare spreads across outcomes:**
+
+```python
+comparisons = await compare_outcomes(
+    client, ["outcome_id_1", "outcome_id_2", "outcome_id_3"]
+)
+for c in comparisons.data:
+    print(f"{c.outcome_id}: spread={c.spread}")
+```
+
+**Aggregate view of a market sector:**
+
+```python
+sector = await get_sector_overview(client, "crypto")
+print(f"{sector.data.category}: {sector.data.event_count} events, "
+      f"{sector.data.total_volume:.0f} total volume")
+```
+
+**Bid-ask spread for a single outcome:**
+
+```python
+spread = await calculate_spread(client, "outcome_id")
+print(f"Spread: {spread.data.spread} ({spread.data.best_bid} / {spread.data.best_ask})")
+```
+
+---
+
 ## Data Science Quickstart
 
 Every response is a Pydantic model, so it drops straight into `pandas` with
@@ -311,6 +386,24 @@ print(df[["outcome", "balance", "cost", "current_value", "unrealized_pnl"]])
 
 ---
 
+## Logging
+
+The SDK uses Python's standard `logging` module with a `NullHandler` (silent by default).
+To inspect SDK internals (requests, retries, trace IDs):
+
+```python
+import logging
+
+sdk_logger = logging.getLogger("bayse_markets")
+sdk_logger.setLevel(logging.DEBUG)
+sdk_logger.addHandler(logging.StreamHandler())
+```
+
+Sensitive headers (`authorization`, `x-signature`, `x-public-key`, etc.) are
+automatically redacted from log output.
+
+---
+
 ## Design Notes
 
 **Typed everywhere.** Every endpoint returns `BayseResponse[T]` where `T` is a Pydantic model. No raw dictionaries, no guesswork about field names. Your editor's autocomplete works.
@@ -331,4 +424,4 @@ MIT — see [LICENSE](LICENSE). This project is unaffiliated with Bayse; "Bayse 
 
 ---
 
-- Full API reference at [docs.bayse.markets](https://docs.bayse.markets).
+Full API reference at [docs.bayse.markets](https://docs.bayse.markets).

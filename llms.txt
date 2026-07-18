@@ -1,0 +1,354 @@
+# Bayse Markets Python SDK
+
+Async Python SDK for the [Bayse Markets](https://docs.bayse.markets) prediction market API. Fully typed, Pydantic v2, covers every endpoint.
+
+Community-built by Ogie Omorose — not affiliated with Bayse.
+
+## Install
+
+```
+pip install bayse-markets     # Python 3.12+
+uv add bayse-markets
+```
+
+## Quick Start
+
+```python
+from bayse_markets import BayseClient
+
+async with BayseClient(public_key="pk_live_...", secret_key="sk_live_...") as client:
+    events = await client.list_events(page=1, size=10)
+    for event in events.data.events:
+        print(f"{event.title}: {event.closing_date}")
+```
+
+All methods are **async only** — always use `await` inside an `async with` block.
+
+## Authentication
+
+Two separate auth domains:
+
+- **BayseClient** — HMAC-signed API keys. The workhorse for everything.
+  `async with BayseClient(public_key="pk_...", secret_key="sk_...") as client:`
+
+- **UserClient** — email/password session for bootstrapping API keys.
+  ```python
+  from bayse_markets import UserClient
+  async with UserClient() as user:
+      await user.login("you@example.com", "password")
+      key = await user.create_api_key("my bot")
+      print(f"pk={key.public_key}, sk={key.secret_key}")
+  ```
+
+**One-time secret keys:** When creating or rotating API keys, the `secret_key` is only returned once. Save it immediately — you won't see it again.
+
+**Auth levels (mapped automatically by the SDK):**
+| Level | When | Headers |
+|-------|------|---------|
+| Public | No auth needed | None |
+| Read | GET endpoints | `X-Public-Key` |
+| Write | Place/cancel orders, mint/burn | `X-Public-Key` + `X-Timestamp` + `X-Signature` |
+
+Some endpoints (price history, order books, sports, quotes) are **public** — no keys needed.
+
+## Response Types
+
+Every endpoint returns `BayseResponse[T]`:
+
+```python
+@dataclass
+class BayseResponse[T]:
+    status_code: int
+    data: T              # Parsed Pydantic model
+    timestamp: datetime
+    headers: dict[str, str]
+    trace_id: str | None
+```
+
+Access fields with dot notation — `event.closing_date`, not `event["closingDate"]`.
+Dump to JSON via `model.model_dump(by_alias=True, mode="json")`.
+Dump to pandas via `pd.DataFrame([e.model_dump() for e in events.data.events])`.
+
+## BayseClient Methods
+
+### System
+| Method | Auth | Description |
+|--------|------|-------------|
+| `client.health()` | public | API alive check |
+| `client.version()` | public | Deployed API version |
+
+### Events
+| Method | Auth | Description |
+|--------|------|-------------|
+| `client.list_events(page, size, category, subcategory, status, keyword, currency, trending, watchlist, series_slug, sport_game_slug)` | read | Paginated event list. Default size 20. |
+| `client.get_event(event_id, currency)` | read | Single event by UUID |
+| `client.get_event_by_slug(slug, currency)` | read | Single event by URL slug |
+| `client.list_event_series(page, size)` | public | Event series (max size 100) |
+| `client.get_lean_events(series_slug)` | public | Lightweight events in a series |
+
+```python
+# List open crypto events in NGN
+events = await client.list_events(
+    page=1, size=50, category="crypto", status="open", currency="NGN"
+)
+```
+
+### Quoting
+| Method | Auth | Description |
+|--------|------|-------------|
+| `client.get_quote(event_id, market_id, side, outcome_id, amount, currency)` | public | Price estimate before committing to an order |
+
+```python
+quote = await client.get_quote(
+    event_id="evt_...", market_id="mkt_...",
+    side="BUY", outcome_id="outcome_uuid",
+    amount=500, currency="USD",
+)
+print(f"Price: {quote.data.price}, Fee: {quote.data.fee}")
+```
+
+### Orders
+| Method | Auth | Description |
+|--------|------|-------------|
+| `client.place_order(event_id, market_id, side, outcome_id, amount, order_type, currency, price, time_in_force, post_only, stp_mode, max_slippage, expires_at)` | write | Place a single order |
+| `client.list_orders(side, status, event_id, market_id, outcome_id, currency, page, size)` | read | Paginated order history |
+| `client.get_order(order_id)` | read | Single order by UUID |
+| `client.cancel_order(order_id)` | write | Cancel open/partially filled order |
+
+```python
+order = await client.place_order(
+    event_id="evt_...", market_id="mkt_...",
+    side="BUY", outcome_id="outcome_uuid",
+    amount=10000, order_type="LIMIT", price=0.65, currency="NGN",
+)
+print(f"Order {order.data.order.id} — {order.data.order.status}")
+```
+
+**Order types:** `"LIMIT"`, `"MARKET"`
+**Time in force:** `"GTC"` (default), `"GTD"`, `"FAK"`, `"FOK"`
+**STP modes:** `"CANCEL_OLDEST"`, `"CANCEL_NEWEST"`, `"DECREMENT_AND_CANCEL"`
+
+### Batch Orders
+| Method | Auth | Description |
+|--------|------|-------------|
+| `client.batch_place_orders(body, idempotency_key)` | write | Up to **20** CLOB orders |
+| `client.batch_amend_orders(body, idempotency_key)` | write | Amend price/size on up to **20** orders |
+| `client.batch_cancel_orders(body, idempotency_key)` | write | Cancel up to **100** CLOB orders |
+
+Batch body uses API field names (`marketId`, `side`, `outcomeId`, `amount`, `type`, `price`):
+
+```python
+result = await client.batch_place_orders(body={
+    "orders": [
+        {"marketId": "...", "side": "BUY", "outcomeId": "outcome_uuid_yes",
+         "amount": 5000, "type": "LIMIT", "price": 0.65, "currency": "USD"},
+        {"marketId": "...", "side": "SELL", "outcomeId": "outcome_uuid_no",
+         "amount": 3000, "type": "LIMIT", "price": 0.30, "currency": "USD"},
+    ]
+})
+```
+
+**⚠️ Batch orders route by `outcomeId`, NOT `marketId`.** The API accepts `marketId` but doesn't validate it — routing is derived from the outcome server-side. Don't rely on `marketId` as a safety check.
+
+### Portfolio & PnL
+| Method | Auth | Description |
+|--------|------|-------------|
+| `client.get_portfolio()` | read | Current positions across all markets |
+| `client.get_pnl(time_period, start, end, currency, breakdown)` | read | Realized P&L over a time window |
+
+```python
+pnl = await client.get_pnl(time_period="1M")
+print(f"PnL: {pnl.data.realized_pnl} ({pnl.data.realized_pnl_percent}%)")
+
+portfolio = await client.get_portfolio()
+for balance in portfolio.data.outcome_balances:
+    print(f"{balance.market.title}: {balance.outcome} = {balance.balance}")
+```
+
+**PnL time periods:** Rolling windows (`"24H"`, `"1W"`, `"1M"`, `"1Y"`, `"ALL"`) or calendar windows (`"THIS_WEEK"`, `"THIS_MONTH"`, `"THIS_YEAR"`). For custom ranges, pass `start` and `end` (ISO 8601) instead.
+
+### Wallet
+| Method | Auth | Description |
+|--------|------|-------------|
+| `client.get_assets()` | read | Wallet balances, deposit/withdrawal addresses |
+
+```python
+wallet = await client.get_assets()
+for asset in wallet.data.assets:
+    print(f"Balance: {asset.available_balance}")
+```
+
+### Market Data (some public)
+| Method | Auth | Description |
+|--------|------|-------------|
+| `client.get_price_history(event_id, time_period, market_ids, outcome)` | **public** | OHLC-style price data per market |
+| `client.get_order_books(outcome_ids, depth, currency)` | **public** | Live order book bids/asks |
+| `client.get_ticker(market_id, outcome, outcome_id)` | read | Real-time price & volume stats |
+| `client.get_trades(params)` | read | Recent executed trades |
+
+```python
+# No keys needed for public endpoints
+books = await client.get_order_books(
+    outcome_ids=["outcome_id_1", "outcome_id_2"], depth=5,
+)
+for book in books.data:
+    print(f"Market {book.market_id}: {len(book.bids)} bids, {len(book.asks)} asks")
+
+history = await client.get_price_history(event_id="evt_...", time_period="1W", outcome="YES")
+for market_id, points in history.data.items():
+    for point in points[:3]:
+        print(f"  {point.timestamp}: {point.price}")
+```
+
+### Activities
+| Method | Auth | Description |
+|--------|------|-------------|
+| `client.get_activities(type, page, size)` | read | Trading activity history |
+
+Activity types: `"buys"`, `"sells"`, `"limits"`, `"payout"`
+
+## Domain Modules (import separately)
+
+All take `BayseClient` as first arg, return `BayseResponse[T]`.
+
+### Sports (public, no auth needed)
+```python
+from bayse_markets.sports import list_leagues, list_teams, list_games
+
+leagues = await list_leagues(client)
+games = await list_games(client, league="EPL", page=1, size=10)
+for game in games.data:
+    print(f"{game.home_team.name} vs {game.away_team.name} — {game.start_time}")
+```
+
+### Liquidity Rewards
+```python
+from bayse_markets.rewards import list_rewards, get_active_rewards
+
+payouts = await list_rewards(client, page=1, size=20)
+active = await get_active_rewards(client)
+```
+
+### Maker Rebates
+```python
+from bayse_markets.maker_rebates import list_maker_rebates, get_active_maker_rebates
+
+rebates = await list_maker_rebates(client, page=1, size=20)
+```
+
+### Market Maker (mint/burn — explicit opt-in)
+```python
+from bayse_markets.market_maker import mint_shares, burn_shares
+
+mint = await mint_shares(client, market_id="mkt_...", quantity=100, currency="USD")
+burn = await burn_shares(client, market_id="mkt_...", quantity=50, currency="USD")
+```
+Minting creates equal YES+NO pairs. Burning destroys them for cash. These don't affect market prices.
+
+## UserClient Methods
+
+| Method | Description |
+|--------|-------------|
+| `user.login(email, password)` | Authenticate, stores session token |
+| `user.create_api_key(name)` | Create API key (**secret_key one-time only**) |
+| `user.list_api_keys()` | List all active keys |
+| `user.revoke_api_key(key_id)` | Permanently deactivate a key |
+| `user.rotate_api_key(key_id)` | New secret, same key ID (**one-time only**) |
+| `user.lookup_user(tag, user_id)` | Resolve username/UUID to public profile |
+
+```python
+async with UserClient() as user:
+    await user.login("you@example.com", "password")
+    keys = await user.list_api_keys()
+    for k in keys.keys:
+        print(f"{k.name}: {k.public_key} ({k.secret_key_hint})")
+    key = await user.create_api_key("new key")
+    print(f"Created: {key.public_key} / {key.secret_key}")   # <-- save this!
+```
+
+## Minimum Order Amounts
+
+- Most markets default to **$1.00 USD** / **₦100.00 NGN**, but individual markets can set their own via the `minimumOrderAmount` field.
+- Always read `event_market.minimum_order_amount` from the live market data instead of hardcoding.
+
+## Error Handling
+
+```python
+from bayse_markets import BayseError
+from bayse_markets.exceptions import (
+    InvalidSignatureError, UnauthorizedError, NotFoundError,
+    ValidationError, RateLimitError, InternalServerError, NetworkError,
+)
+```
+
+| Exception | HTTP | When |
+|-----------|------|------|
+| `InvalidSignatureError` | 401 | HMAC signature mismatch |
+| `TimestampExpiredError` | 401 | Request too old |
+| `UnauthorizedError` | 401 | Missing/invalid API key |
+| `NotFoundError` | 404 | Resource doesn't exist |
+| `ValidationError` | 422 | Invalid parameters |
+| `RateLimitError` | 429 | Back off — check `.retry_after_seconds` |
+| `InternalServerError` | 500 | API-side failure |
+| `NetworkError` | 0 | Timeout/DNS/SSL issues |
+
+Rate limits: No client-side throttling. Handle `RateLimitError` and read `retry_after_seconds`. Batch calls are charged per item against the write rate-limit bucket.
+
+## Retry Behavior
+
+- **Automatic exponential backoff + jitter** on 429 and 5xx status codes.
+- Default: 5 retries (configurable per-call via `max_retries`).
+- 4xx errors (except 429) are raised immediately — no retry.
+- Disable with `max_retries=0`.
+
+```python
+# Custom retry per request
+order = await client.place_order(..., max_retries=3)
+```
+
+## Tracing
+
+Auto-generated trace IDs (`"{session_id}-{seq:06d}"`) sent as `x-trace-id` header and echoed back in the response. Customize via:
+
+```python
+client = BayseClient(pk, sk, trace_config=TraceConfig(session_id="mybot"))
+# Or override per call:
+events = await client.list_events(trace_id="custom-trace")
+```
+
+## Logging
+
+The SDK logs via ``logging.getLogger("bayse_markets")`` with a ``NullHandler`` (silent by default). Enable it:
+
+```python
+import logging
+logging.getLogger("bayse_markets").setLevel(logging.DEBUG)
+logging.getLogger("bayse_markets").addHandler(logging.StreamHandler())
+```
+
+Sensitive headers (``authorization``, ``x-signature``, ``x-public-key``, etc.) are redacted automatically.
+
+## Utilities
+
+Convenience functions in ``bayse_markets.utils`` that combine or derive data across API calls:
+
+| Function | What it does |
+|----------|-------------|
+| `get_closing_soon(client, hours=24)` | Filters ``list_events()`` by ``closing_date`` client-side |
+| `get_high_volume_markets(client, min_volume)` | Filters ``list_events()`` by ``total_volume`` |
+| `get_market_summary(client, event_id)` | Parallel ``get_event()`` + ``get_order_books()`` for all outcomes |
+| `get_portfolio_breakdown(client)` | Parallel ``get_portfolio()`` + ``get_assets()`` |
+| `compare_outcomes(client, outcome_ids)` | Spread stats for multiple outcomes |
+| `calculate_spread(client, outcome_id)` | Bid-ask spread for a single outcome |
+| `get_sector_overview(client, category)` | Aggregate metrics (volume, liquidity, count) for a category |
+
+## Key Gotchas
+
+1. **Async only.** All methods are `async`. Use `asyncio.run()` or `await` inside an async context.
+2. **Amounts as floats.** API sends numeric amounts as strings for some endpoints (`Activity` model handles this with a `@field_validator`). Models store them as `float`.
+3. **Batch routing.** `batch_place_orders` routes by `outcomeId` — `marketId` is accepted but ignored server-side.
+4. **Secret keys are one-time.** On create/rotate, save `secret_key` immediately. You won't see it again.
+5. **Market maker is separate.** `mint_shares`/`burn_shares` are not on the `BayseClient` instance — import from `bayse_markets.market_maker` explicitly. The models are in `market_maker/models.py`, NOT in `models/__init__` (circular import protection).
+6. **Outcome enum is lenient.** `Outcome("YES")` and `Outcome("NO")` work, but `_missing_()` accepts arbitrary strings without error.
+7. **Per-market minimum order.** Don't hardcode $1/₦100 — read `event_market.minimum_order_amount` from the live market data.
+8. **No sandbox yet.** The `Env.SANDBOX` enum exists but the sandbox environment is WIP. Use `Env.PRODUCTION` for now.
