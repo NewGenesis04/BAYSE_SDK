@@ -60,16 +60,24 @@ class RetryConfig:
     retry_on_statuses: tuple[int, ...] = (429, 500, 502, 503, 504)
     """HTTP status codes that trigger a retry on safe or idempotent requests."""
 
-    retry_unsafe_on_statuses: tuple[int, ...] = (429,)
+    retry_unsafe_on_statuses: tuple[int, ...] = ()
     """HTTP status codes that trigger a retry on non-idempotent requests.
 
-    Deliberately narrower than :attr:`retry_on_statuses`. A ``502`` or ``504`` on a
-    ``POST`` may mean the upstream *did* process the request, so replaying it risks a
-    duplicate order. ``429`` is included because the Bayse rate limiter rejects
-    over-budget requests before they reach the matching engine, so a rate-limited write
-    never touched anything and is safe to replay.
+    Empty by default: a non-idempotent request is **never** automatically replayed.
+    A ``502`` or ``504`` on a ``POST`` may mean the upstream *did* process the
+    request and only the response was lost, so replaying it risks a duplicate order.
 
-    Set to ``()`` to disable retries on non-idempotent requests entirely.
+    ``429`` is excluded too, despite being tempting. Retrying it is only safe if the
+    rate limiter sits strictly in front of order acceptance — an assumption about
+    Bayse's infrastructure that cannot be verified from the client. Live probing could
+    not provoke a ``429`` on any route at three times the documented limits, so the
+    setting would buy an unmeasurable benefit in exchange for up to
+    ``max_retries + 1`` live order submissions if the assumption is wrong.
+
+    Set it explicitly to opt in, e.g. ``retry_unsafe_on_statuses=(429,)``, if you know
+    where your limiter sits. To retry writes safely instead, use the batch endpoints
+    with an ``idempotency_key`` — the server genuinely deduplicates on it (verified
+    2026-07-29), which re-enables the full :attr:`retry_on_statuses` set.
     """
 
     safe_methods: frozenset[str] = frozenset({"GET", "HEAD", "OPTIONS"})

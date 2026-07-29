@@ -76,16 +76,28 @@ class TestMethodAwareRetry:
         for status in (500, 502, 503, 504):
             assert strategy.should_retry(0, status, method="POST") is False
 
-    def test_post_is_retried_on_429_by_default(self) -> None:
-        """Bayse rejects over-budget writes before the matching engine sees them."""
+    def test_post_is_not_retried_on_429_by_default(self) -> None:
+        """Retrying a 429 assumes the limiter sits in front of order acceptance.
+
+        That is unverifiable from the client, and if it is wrong the cost is
+        ``max_retries + 1`` live orders. Opt in, never default.
+        """
         strategy = RetryStrategy(RetryConfig(max_retries=3))
 
-        assert strategy.should_retry(0, 429, method="POST") is True
+        assert strategy.should_retry(0, 429, method="POST") is False
+
+    def test_no_status_at_all_retries_an_unsafe_request_by_default(self) -> None:
+        strategy = RetryStrategy(RetryConfig(max_retries=3))
+
+        for status in (429, 500, 502, 503, 504):
+            assert strategy.should_retry(0, status, method="POST") is False
 
     def test_unsafe_statuses_are_configurable(self) -> None:
-        strategy = RetryStrategy(RetryConfig(max_retries=3, retry_unsafe_on_statuses=()))
+        """A caller who knows where their limiter sits can opt back in."""
+        strategy = RetryStrategy(RetryConfig(max_retries=3, retry_unsafe_on_statuses=(429,)))
 
-        assert strategy.should_retry(0, 429, method="POST") is False
+        assert strategy.should_retry(0, 429, method="POST") is True
+        assert strategy.should_retry(0, 502, method="POST") is False
 
     def test_idempotency_key_reenables_5xx_retry_on_post(self) -> None:
         strategy = RetryStrategy(RetryConfig(max_retries=3))
@@ -109,6 +121,9 @@ class TestMethodAwareRetry:
         assert strategy.should_retry(2, 502, method="GET", idempotent=True) is False
 
     def test_unsafe_retry_still_respects_max_retries(self) -> None:
-        strategy = RetryStrategy(RetryConfig(max_retries=2))
+        strategy = RetryStrategy(
+            RetryConfig(max_retries=2, retry_unsafe_on_statuses=(429,))
+        )
 
+        assert strategy.should_retry(1, 429, method="POST") is True
         assert strategy.should_retry(2, 429, method="POST") is False

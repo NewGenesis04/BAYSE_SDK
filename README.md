@@ -32,6 +32,78 @@ uv add bayse-markets
 
 Requires Python 3.12+.
 
+See [CHANGELOG.md](CHANGELOG.md) for release notes. **0.2.0 contains breaking
+changes** — if you are upgrading from 0.1.0, read
+[Migrating to 0.2.0](CHANGELOG.md#migrating-to-020).
+
+---
+
+## Configuration
+
+The client works with just two keys, but every knob is adjustable.
+
+```python
+from bayse_markets import BayseClient
+from bayse_markets._config import Env
+
+async with BayseClient(
+    public_key="pk_live_...",
+    secret_key="sk_live_...",
+    env=Env.SANDBOX,   # or "sandbox" — defaults to production
+    timeout=30.0,
+) as client:
+    ...
+```
+
+Retry and trace behaviour are passed as objects:
+
+```python
+from bayse_markets._config import RetryConfig, TraceConfig
+from bayse_markets._retry import RetryStrategy
+
+client = BayseClient(
+    public_key="pk_live_...",
+    secret_key="sk_live_...",
+    retry_strategy=RetryStrategy(RetryConfig(max_retries=3, base_delay=0.5)),
+    trace_config=TraceConfig(session_id="my-bot"),
+)
+```
+
+<details>
+<summary><strong>All configuration fields</strong></summary>
+
+**`BayseClient(...)`**
+
+| Argument | Default | Meaning |
+|---|---|---|
+| `env` | `Env.PRODUCTION` | `PRODUCTION` → `relay.bayse.markets`, `SANDBOX` → `sandbox.relay.bayse.markets`. Accepts the string `"sandbox"` too. |
+| `timeout` | `30.0` | HTTP timeout in seconds. |
+| `retry_strategy` | `RetryStrategy(RetryConfig())` | See below. |
+| `trace_config` | `TraceConfig()` | See below. |
+| `signer` | HMAC-SHA256 | Override only if you need custom request signing. |
+
+**`RetryConfig`**
+
+| Field | Default | Meaning |
+|---|---|---|
+| `max_retries` | `5` | Attempts after the first. `0` disables retries. |
+| `base_delay` | `1.0` | Base for the exponential backoff, in seconds. |
+| `max_delay` | `60.0` | Ceiling on any single delay. |
+| `jitter` | `0.1` | Random 0–`jitter` seconds added per delay. |
+| `retry_on_statuses` | `(429, 500, 502, 503, 504)` | Applied to safe and idempotent requests. |
+| `retry_unsafe_on_statuses` | `()` | Applied to non-idempotent requests. Empty by default — see [Reliability & Retries](#reliability--retries). |
+| `safe_methods` | `{GET, HEAD, OPTIONS}` | Never has side effects. |
+| `idempotent_methods` | `{PUT, DELETE}` | Idempotent by HTTP specification. |
+
+**`TraceConfig`**
+
+| Field | Default | Meaning |
+|---|---|---|
+| `session_id` | random 12-char hex | Prefix for generated trace IDs. |
+| `start_sequence` | `1` | First sequence number. |
+
+</details>
+
 ---
 
 ## Key Features
@@ -41,7 +113,8 @@ Requires Python 3.12+.
 - **UserClient** — bootstrap API keys programmatically from email + password. No need to visit the web UI.
 - **No auth needed for some endpoints** — price history and order books are public.
 - **Full API coverage** — events, orders (single + batch), quoting, portfolio, PnL, trades, activities, wallet, sports, liquidity rewards, maker rebates, market maker, system health.
-- **Async only** — built on `httpx` with automatic retries, exponential backoff, and trace IDs.
+- **Async only** — built on `httpx` with [method-aware retries](#reliability--retries), exponential backoff, and [trace IDs](#trace-ids). A failed `GET` is replayed; a failed order is not.
+- **Retry-safe writes** — the batch endpoints support real, server-verified [idempotency keys](#idempotency).
 - **AI-friendly reference** — [`llms.txt`](llms.txt) at the project root gives AI coding tools a condensed, complete reference for using this SDK.
 
 ---
@@ -401,6 +474,150 @@ sdk_logger.addHandler(logging.StreamHandler())
 
 Sensitive headers (`authorization`, `x-signature`, `x-public-key`, etc.) are
 automatically redacted from log output.
+
+---
+
+## Reliability & Retries
+
+Retries are **method-aware**. A `502` on a `GET` is worth replaying. A `502` on a
+`POST /orders` may mean the order was accepted and only the response was lost —
+replaying it risks a duplicate. So the SDK does not replay it.
+
+| Request | Retried on |
+|---|---|
+| `GET` / `HEAD` / `OPTIONS` | `429, 500, 502, 503, 504` |
+| `DELETE` / `PUT` | `429, 500, 502, 503, 504` |
+| `POST` | **nothing — never retried** |
+| `POST` with an `Idempotency-Key` | `429, 500, 502, 503, 504` |
+
+Backoff is exponential with jitter, capped at `max_delay`. Every retry of a
+non-idempotent request logs at **WARNING** with the trace ID and attempt number —
+it is the one event you want in your scrollback without having enabled debug
+logging in advance.
+
+**Why `429` is not retried on a `POST`.** It would be safe only if the rate
+limiter sits strictly in front of order acceptance, which no client can verify.
+If that assumption is wrong, the cost at the default `max_retries=5` is six live
+orders. Opt in if you know your own infrastructure:
+
+```python
+RetryConfig(retry_unsafe_on_statuses=(429,))
+```
+
+## Idempotency
+
+The batch endpoints accept an `idempotency_key` and the server genuinely
+**deduplicates** on it — a replay returns the original result instead of acting
+twice. Supplying one re-enables full `5xx` retries for that call.
+
+```python
+result = await client.batch_place_orders(
+    body={"orders": [{...}]},
+    idempotency_key="order-2026-07-29-0001",   # your own unique string
+)
+```
+
+Verified against production: the same key with an identical body returns the
+*original* order id and creates one order; two distinct keys with the same body
+create two. The replayed response is indistinguishable from the first — a normal
+`200`, not an error.
+
+> **`place_order` and `cancel_order` do not support idempotency keys.** The API
+> accepts the header on those routes and silently ignores it, so the SDK does not
+> offer the parameter — accepting a key and dropping it would be worse than not
+> having one. If you need a retry-safe write, use `batch_place_orders` with a
+> batch of one. Otherwise, treat a failed single write as *unresolved* and
+> reconcile with `list_orders(currency=...)` before re-sending.
+
+## Trace IDs
+
+Every request carries an `x-trace-id`, auto-generated as
+`{session_id}-{sequence:06d}`. Quote it when reporting an issue to Bayse.
+
+```python
+resp = await client.list_events(page=1, size=10)
+print(resp.trace_id)          # e.g. "77f08ca6d00d-000003"
+
+# Override per call to correlate with your own logs
+await client.get_portfolio(trace_id="reconcile-run-42")
+```
+
+Pin `session_id` so a bot's traces stay greppable across restarts:
+
+```python
+BayseClient(..., trace_config=TraceConfig(session_id="marketmaker-prod"))
+```
+
+## Error Handling
+
+Every API error raises a subclass of `BayseError`, carrying `error_code`,
+`status_code`, `response_headers`, and `timestamp`.
+
+| Exception | Status | Notes |
+|---|---|---|
+| `InvalidSignatureError` | 401 | Signature mismatch — check the secret key. |
+| `TimestampExpiredError` | 401 | Clock skew beyond the 5-minute window. |
+| `UnauthorizedError` | 401/403 | Key missing or lacks permission. |
+| `NotFoundError` | 404 | Resource does not exist. |
+| `ValidationError` | 422 | Request rejected — read `.message`. |
+| `RateLimitError` | 429 | Carries `.retry_after_seconds` when the header is present. |
+| `InternalServerError` | 500 | Server-side. |
+| `NetworkError` | — | Transport-level; never reached the API layer. |
+
+**`NetworkError` tells you whether the request left your machine**, which is the
+difference between safely re-sending a write and risking a duplicate:
+
+```python
+from bayse_markets.exceptions import NetworkError
+
+try:
+    await client.place_order(...)
+except NetworkError as exc:
+    if exc.request_sent is False:
+        ...  # connect-phase failure: the server never saw it, safe to re-send
+    else:
+        ...  # None = unknown. The order may exist. Reconcile, do not re-send.
+```
+
+`False` means a connect-phase failure (`ConnectError`, `ConnectTimeout`,
+`PoolTimeout`, `ProxyError`) — definitively never delivered. `None` means the
+connection was live when it broke, so the outcome is genuinely unknown. The
+original `httpx` exception is preserved on `.original_exception`.
+
+## Known API Behaviours
+
+Confirmed against the live API. These are venue behaviours, not SDK bugs — some
+contradict Bayse's published docs.
+
+- **`list_orders()` returns an empty page unless you pass `currency`.** A missing
+  `currency` is not "all currencies" — it is a `200` with zero results and
+  well-formed pagination. An account holding 60 NGN orders looks flat. The SDK
+  logs a WARNING when this happens, but never use a bare call to conclude an
+  account is empty. Values are case-sensitive.
+
+- **`stp_mode` silently falls back to `SKIP` on any unrecognised value.** No error,
+  no warning. The real set is `SKIP` (default), `CANCEL_OLDEST`, `CANCEL_NEWEST`,
+  `CANCEL_BOTH`. A typo leaves a CLOB order with no self-trade protection while
+  reading like working code.
+
+- **`max_slippage` accepts 0–0.50**, not the documented 0.00–1.00, and is never
+  echoed back in any response — so you cannot confirm afterwards which bound was
+  applied. Whether the engine enforces it at fill time is unverified.
+
+- **Minimum order amount is 100** in the quote currency.
+
+- **Orders route on `outcome_id` alone.** `marketId` is accepted but not
+  validated; the market is derived server-side from the outcome. Don't rely on it
+  as a safety check.
+
+- **Order statuses are lowercase**: `pending`, `open`, `partial_filled`, `filled`,
+  `cancelled`, `rejected`, `expired`. The `status` filter accepts all of these
+  *except* `pending`, so a status-by-status sweep silently misses pending orders.
+
+- **`outcome` means different things on different routes.** The read routes send
+  `outcomeId` + `outcomeLabel`; the place route sends `outcome` holding a UUID.
+  The SDK normalises both to `.outcome_id`. Note that `PlacedOrder.type` holds the
+  *side* — prefer `.side` and `.order_type`, which are consistent everywhere.
 
 ---
 

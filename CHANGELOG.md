@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-29
+
+A code review after the 0.2.0 release surfaced one unsafe default and several
+pieces of undocumented API behaviour. Nothing here changes a signature, but the
+first entry under Changed **does** change runtime behaviour — read it before
+upgrading if you write to the API.
+
+### Changed
+
+- **`RetryConfig.retry_unsafe_on_statuses` now defaults to `()` instead of
+  `(429,)`. Non-idempotent requests are no longer retried on anything.**
+
+  0.2.0 retried a `POST` on `429`, reasoning that the rate limiter rejects
+  over-budget writes before they reach the matching engine. That reasoning came
+  from a line in the API docs written about the *batch* routes, and applying it
+  to single order placement was an inference about server infrastructure that a
+  client cannot verify. With the default `max_retries=5`, being wrong costs six
+  live order submissions on a route with no idempotency support.
+
+  Live probing also found the documented rate limits unenforced — 200 reads at
+  ~65/s and 200 writes at ~58/s against documented limits of 30/s and 20/s
+  produced zero `429`s. So the old default bought an unmeasurable benefit for a
+  real tail risk.
+
+  Restore the previous behaviour explicitly if you know where your limiter sits:
+
+  ```python
+  RetryConfig(retry_unsafe_on_statuses=(429,))
+  ```
+
+- Documented that `PlacedOrder.type` holds the order **side** (`"BUY"`), not the
+  order type. The place route puts the side in `type` and the type in
+  `orderType`, inverting the read routes, so reading `.type` expecting
+  `LIMIT`/`MARKET` silently yields a side. Prefer `.side` and `.order_type`,
+  which mean the same thing on every route — the place response populates `side`
+  too, so nothing is lost. Field mapping is unchanged; it was simply unmarked.
+
+- `max_slippage` now documents that enforcement at fill time is **unverified**.
+  Only submission-time validation has been observed, and this API has precedent
+  for accepting a parameter and ignoring it (`stp_mode` silently falls back to
+  `SKIP`). Treat it as defence in depth behind your own price checks, not as a
+  guaranteed server-side guard.
+
+- The `idempotency_key` parameter on the three batch methods now documents that
+  the server genuinely **deduplicates** on it, rather than merely accepting it.
+  Verified live: the same key with an identical body returns the *original* order
+  id and creates one order, while two distinct keys with the same body create
+  two. A batch of one is therefore the only safe write-retry path this API
+  offers — `place_order` has no idempotency support at all.
+
+### Added
+
+- `Order.outcome_label` — the human-readable outcome name (e.g. `"Up"`) returned
+  by the order-read routes. It was previously parsed and discarded. Outcome
+  labels are arbitrary per-market strings rather than `YES`/`NO`, so this is the
+  only way to render an outcome without a second lookup.
+
 ## [0.2.0] - 2026-07-29
 
 Retries are now aware of HTTP method semantics, so a failed write is no longer
@@ -124,6 +181,7 @@ Most callers need no changes. Review your code if any of the following apply:
 
 - Initial release.
 
-[Unreleased]: https://github.com/NewGenesis04/BAYSE_SDK/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/NewGenesis04/BAYSE_SDK/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/NewGenesis04/BAYSE_SDK/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/NewGenesis04/BAYSE_SDK/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/NewGenesis04/BAYSE_SDK/releases/tag/v0.1.0

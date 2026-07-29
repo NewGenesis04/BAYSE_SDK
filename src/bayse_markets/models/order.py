@@ -34,6 +34,13 @@ class Order(BaseModel):
     market_id: str = Field(alias="marketId")
     outcome_id: str = Field(alias="outcomeId")
     """UUID of the outcome. The wire key is ``outcomeId`` on this route."""
+    outcome_label: str | None = Field(default=None, alias="outcomeLabel")
+    """Human-readable outcome name, e.g. ``"Up"``.
+
+    Labels are arbitrary per-market strings, not ``YES``/``NO``, so this is the only
+    way to render an outcome without a second lookup. Optional because the place-order
+    route does not return it.
+    """
     side: str
     order_type: str = Field(alias="type")
     stp_mode: str = Field(alias="stpMode")
@@ -68,6 +75,16 @@ class PlacedOrder(BaseModel):
     """
     side: str | None = None
     type: str | None = None
+    """The order **side** (``"BUY"``/``"SELL"``) — *not* the order type.
+
+    The place route puts the side in ``type`` and the type in ``orderType``; the read
+    routes do the opposite, putting the type in ``type``. Reading ``.type`` here
+    expecting ``LIMIT``/``MARKET`` silently yields a side instead.
+
+    Prefer :attr:`side` and :attr:`order_type`, which mean the same thing on every
+    route — the live place response populates ``side`` as well, so nothing is lost.
+    This field is retained only for wire fidelity.
+    """
     status: str | None = None
     amount: float | None = None
     price: float | None = None

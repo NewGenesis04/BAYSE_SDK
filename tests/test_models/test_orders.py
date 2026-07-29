@@ -108,3 +108,40 @@ class TestOutcomeIdNaming:
         placed = PlacedOrder(id="x", outcome_id="abc")
 
         assert placed.outcome_id == "abc"
+
+
+class TestOutcomeLabel:
+    """The only human-readable outcome name on the read route."""
+
+    def test_order_keeps_the_outcome_label(self) -> None:
+        order = Order.model_validate(LIVE_GET_RESPONSE)
+
+        assert order.outcome_label == "Up"
+
+    def test_outcome_label_is_optional_for_routes_that_omit_it(self) -> None:
+        payload = {k: v for k, v in LIVE_GET_RESPONSE.items() if k != "outcomeLabel"}
+
+        assert Order.model_validate(payload).outcome_label is None
+
+
+class TestPlacedOrderTypeIsTheSide:
+    """`type` on the place route holds the SIDE, not the order type."""
+
+    def test_type_holds_the_side_and_order_type_holds_the_type(self) -> None:
+        placed = PlacedOrder.model_validate(LIVE_PLACE_RESPONSE["clobOrder"])
+
+        assert placed.type == "BUY"
+        assert placed.order_type == "LIMIT"
+
+    def test_side_is_populated_so_type_is_never_needed(self) -> None:
+        """Why the docstring can safely point callers at `.side` instead."""
+        placed = PlacedOrder.model_validate(LIVE_PLACE_RESPONSE["clobOrder"])
+
+        assert placed.side == placed.type == "BUY"
+
+    def test_the_two_routes_disagree_about_what_type_means(self) -> None:
+        order = Order.model_validate(LIVE_GET_RESPONSE)
+        placed = PlacedOrder.model_validate(LIVE_PLACE_RESPONSE["clobOrder"])
+
+        assert order.order_type == placed.order_type == "LIMIT"
+        assert order.side == placed.side == "BUY"

@@ -333,24 +333,32 @@ lost, so it is not replayed.
 |---------|-----------|
 | `GET` / `HEAD` / `OPTIONS` (safe) | `429, 500, 502, 503, 504` |
 | `DELETE` / `PUT` (idempotent by spec) | `429, 500, 502, 503, 504` |
-| `POST` (non-idempotent) | `429` only |
-| `POST` with an `Idempotency-Key` | `429, 500, 502, 503, 504` |
+| `POST` (non-idempotent) | **nothing — never retried** |
+| `POST` with an `Idempotency-Key` (batch routes) | `429, 500, 502, 503, 504` |
 
-`POST` retries on 429 because Bayse rejects over-budget writes before they reach
-the matching engine, so a rate-limited write never touched anything. Both sets
-are configurable:
+A `POST` is never replayed automatically, including on 429. Retrying a 429 would
+only be safe if the rate limiter sat strictly in front of order acceptance, which
+cannot be verified from the client; if that assumption is wrong the cost is
+`max_retries + 1` live orders. Opt in with `retry_unsafe_on_statuses=(429,)` if you
+know your limiter's placement.
+
+**The safe way to retry a write is an idempotency key.** The batch endpoints
+genuinely deduplicate on `Idempotency-Key` — verified live: the same key with an
+identical body returns the *original* order id and creates one order, while two
+distinct keys with the same body create two. A batch of one is therefore a safer
+order path than `place_order`, which has no idempotency support at all.
 
 ```python
 from bayse_markets._config import RetryConfig
 
 RetryConfig(
     retry_on_statuses=(429, 500, 502, 503, 504),   # safe / idempotent
-    retry_unsafe_on_statuses=(429,),               # non-idempotent; () to disable
+    retry_unsafe_on_statuses=(),                   # non-idempotent; opt in explicitly
 )
 ```
 
 - Default: 5 retries (configurable per-call via `max_retries`).
-- 4xx errors (except 429) are raised immediately — no retry.
+- 4xx errors are raised immediately — no retry.
 - Disable with `max_retries=0`.
 - A retry of a non-idempotent call logs at **WARNING** with the trace ID — it is
   the only signal that a duplicate may exist upstream.

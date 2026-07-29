@@ -615,8 +615,14 @@ class BayseClient:
                 ``api-reference.md:1149`` documents the range as 0.00–1.00 and is
                 wrong.) The value is validated on submission but is **not echoed
                 back** in any response field, so there is no way to confirm from
-                the order which value was applied. Ignored for ``LIMIT`` orders,
-                where the limit price is the price protection.
+                the order which value was applied. Whether the matching engine
+                enforces the bound at fill time is **unverified** — only
+                submission-time validation has been observed, and this API has
+                precedent for accepting a parameter and ignoring it (``stp_mode``
+                silently falls back to ``"SKIP"``). Treat it as defence in depth
+                behind your own price checks, not as a guaranteed server-side
+                guard. Ignored for ``LIMIT`` orders, where the limit price is the
+                price protection.
             expires_at: ISO 8601 expiration (required for ``GTD``).
             trace_id: Optional trace ID for request correlation.
             max_retries: Maximum retry attempts. See ``RetryConfig`` for which
@@ -829,7 +835,11 @@ class BayseClient:
 
         Args:
             body: Batch order payload with ``orders`` array.
-            idempotency_key: Optional key for idempotent retries.
+            idempotency_key: Optional key for safe retries. The server
+                deduplicates on it (verified live): resending the same key with
+                an identical body returns the original result instead of acting
+                twice. Supplying one re-enables ``5xx`` retries for this call,
+                which are otherwise disabled for non-idempotent requests.
             trace_id: Optional trace ID for request correlation.
             max_retries: Maximum retry attempts. See ``RetryConfig`` for which
                 statuses are retried; non-idempotent calls use a narrower set.
@@ -878,7 +888,11 @@ class BayseClient:
 
         Args:
             body: Batch amend payload with ``orders`` array.
-            idempotency_key: Optional key for idempotent retries.
+            idempotency_key: Optional key for safe retries. The server
+                deduplicates on it (verified live): resending the same key with
+                an identical body returns the original result instead of acting
+                twice. Supplying one re-enables ``5xx`` retries for this call,
+                which are otherwise disabled for non-idempotent requests.
             trace_id: Optional trace ID for request correlation.
             max_retries: Maximum retry attempts. See ``RetryConfig`` for which
                 statuses are retried; non-idempotent calls use a narrower set.
@@ -926,7 +940,11 @@ class BayseClient:
 
         Args:
             body: Batch cancel payload with ``orderIds`` array.
-            idempotency_key: Optional key for idempotent retries.
+            idempotency_key: Optional key for safe retries. The server
+                deduplicates on it (verified live): resending the same key with
+                an identical body returns the original result instead of acting
+                twice. Supplying one re-enables ``5xx`` retries for this call,
+                which are otherwise disabled for non-idempotent requests.
             trace_id: Optional trace ID for request correlation.
             max_retries: Maximum retry attempts. See ``RetryConfig`` for which
                 statuses are retried; non-idempotent calls use a narrower set.

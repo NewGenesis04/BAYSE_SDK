@@ -88,7 +88,12 @@ class TestMethodAwareRetryAtCallSite:
     """The retry decision must reach the transport, not just the strategy."""
 
     @staticmethod
-    def _client_returning(status: int, *, calls: list[str]) -> BayseClient:
+    def _client_returning(
+        status: int,
+        *,
+        calls: list[str],
+        retry_unsafe_on_statuses: tuple[int, ...] = (),
+    ) -> BayseClient:
         client = BayseClient("pk_test", "sk_test")
 
         async def _request(method: str, path: str, **kwargs: object) -> httpx.Response:
@@ -102,7 +107,14 @@ class TestMethodAwareRetryAtCallSite:
         transport = Mock(spec=httpx.AsyncClient)
         transport.request = _request
         client._http = transport
-        client._retry = RetryStrategy(RetryConfig(max_retries=2, base_delay=0.0, jitter=0.0))
+        client._retry = RetryStrategy(
+            RetryConfig(
+                max_retries=2,
+                base_delay=0.0,
+                jitter=0.0,
+                retry_unsafe_on_statuses=retry_unsafe_on_statuses,
+            )
+        )
         return client
 
     @pytest.mark.asyncio
@@ -136,9 +148,19 @@ class TestMethodAwareRetryAtCallSite:
         assert len(calls) == 3
 
     @pytest.mark.asyncio
-    async def test_post_is_retried_on_429(self) -> None:
+    async def test_post_is_not_retried_on_429_by_default(self) -> None:
         calls: list[str] = []
         client = self._client_returning(429, calls=calls)
+
+        with pytest.raises(BayseError):
+            await client._request("POST", "/v1/pm/orders", body={"a": 1}, auth_level="write")
+
+        assert calls == ["POST"], "a rate-limited write was replayed without opt-in"
+
+    @pytest.mark.asyncio
+    async def test_post_retries_on_429_when_the_caller_opts_in(self) -> None:
+        calls: list[str] = []
+        client = self._client_returning(429, calls=calls, retry_unsafe_on_statuses=(429,))
 
         with pytest.raises(BayseError):
             await client._request("POST", "/v1/pm/orders", body={"a": 1}, auth_level="write")
@@ -160,7 +182,7 @@ class TestMethodAwareRetryAtCallSite:
     @pytest.mark.asyncio
     async def test_unsafe_retry_logs_at_warning(self, caplog: pytest.LogCaptureFixture) -> None:
         calls: list[str] = []
-        client = self._client_returning(429, calls=calls)
+        client = self._client_returning(429, calls=calls, retry_unsafe_on_statuses=(429,))
 
         with caplog.at_level(logging.WARNING, logger="bayse_markets"), pytest.raises(BayseError):
             await client._request(
