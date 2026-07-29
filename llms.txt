@@ -111,7 +111,7 @@ print(f"Price: {quote.data.price}, Fee: {quote.data.fee}")
 | Method | Auth | Description |
 |--------|------|-------------|
 | `client.place_order(event_id, market_id, side, outcome_id, amount, order_type, currency, price, time_in_force, post_only, stp_mode, max_slippage, expires_at)` | write | Place a single order |
-| `client.list_orders(side, status, event_id, market_id, outcome_id, currency, page, size)` | read | Paginated order history |
+| `client.list_orders(side, status, event_id, market_id, outcome_id, currency, page, size)` | read | Paginated order history — **always pass `currency`**, see below |
 | `client.get_order(order_id)` | read | Single order by UUID |
 | `client.cancel_order(order_id)` | write | Cancel open/partially filled order |
 
@@ -124,9 +124,38 @@ order = await client.place_order(
 print(f"Order {order.data.order.id} — {order.data.order.status}")
 ```
 
+**`list_orders` requires `currency` in practice.** Omitting it does not mean "all
+currencies" — the API returns an **empty page** with a `200`. An account holding
+60 NGN orders returns `totalCount=0` for both a bare call and `currency="USD"`.
+Call once per currency you trade, and never read a bare call's empty result as
+"no orders". The SDK logs a warning if you appear to have done so. Values are
+case-sensitive (`"NGN"`, not `"ngn"`).
+
+```python
+ngn = await client.list_orders(currency="NGN", size=100)
+usd = await client.list_orders(currency="USD", size=100)
+```
+
+**Outcome fields:** every order *read* route (`list_orders`, `get_order`) sends
+`outcomeId` + `outcomeLabel`; the *place* route sends `outcome`, which also holds
+a UUID rather than a `YES`/`NO` label. Both are exposed as `.outcome_id`, so you
+can key on a UUID everywhere. (`docs.bayse.markets` shows `"outcome": "YES"` for
+these routes and is incorrect.)
+
+**`max_slippage` (MARKET orders):** accepted range is **0 to 0.50**, not 0.00–1.00
+as `docs.bayse.markets` states — out-of-range values are rejected with
+`400 "max slippage must be between 0 and 0.50"`. It is validated on submission but
+**never echoed back** in any response field, so an order cannot be inspected after
+the fact to confirm which value was applied. Ignored for `LIMIT` orders, where the
+limit price is the price protection.
+
 **Order types:** `"LIMIT"`, `"MARKET"`
 **Time in force:** `"GTC"` (default), `"GTD"`, `"FAK"`, `"FOK"`
-**STP modes:** `"CANCEL_OLDEST"`, `"CANCEL_NEWEST"`, `"DECREMENT_AND_CANCEL"`
+**STP modes (CLOB only):** `"SKIP"` (default), `"CANCEL_OLDEST"`, `"CANCEL_NEWEST"`, `"CANCEL_BOTH"`
+
+Unknown values fall back to `"SKIP"` **silently** — no error is raised. A typo in
+`stp_mode` therefore reads as working code while leaving the order with no
+self-trade protection at all.
 
 ### Batch Orders
 | Method | Auth | Description |
@@ -296,14 +325,58 @@ Rate limits: No client-side throttling. Handle `RateLimitError` and read `retry_
 
 ## Retry Behavior
 
-- **Automatic exponential backoff + jitter** on 429 and 5xx status codes.
+Retries are **method-aware**. A 502 on a `GET` is worth replaying; a 502 on a
+`POST /orders` may mean the order was already placed and only the response was
+lost, so it is not replayed.
+
+| Request | Retried on |
+|---------|-----------|
+| `GET` / `HEAD` / `OPTIONS` (safe) | `429, 500, 502, 503, 504` |
+| `DELETE` / `PUT` (idempotent by spec) | `429, 500, 502, 503, 504` |
+| `POST` (non-idempotent) | `429` only |
+| `POST` with an `Idempotency-Key` | `429, 500, 502, 503, 504` |
+
+`POST` retries on 429 because Bayse rejects over-budget writes before they reach
+the matching engine, so a rate-limited write never touched anything. Both sets
+are configurable:
+
+```python
+from bayse_markets._config import RetryConfig
+
+RetryConfig(
+    retry_on_statuses=(429, 500, 502, 503, 504),   # safe / idempotent
+    retry_unsafe_on_statuses=(429,),               # non-idempotent; () to disable
+)
+```
+
 - Default: 5 retries (configurable per-call via `max_retries`).
 - 4xx errors (except 429) are raised immediately — no retry.
 - Disable with `max_retries=0`.
+- A retry of a non-idempotent call logs at **WARNING** with the trace ID — it is
+  the only signal that a duplicate may exist upstream.
 
 ```python
 # Custom retry per request
 order = await client.place_order(..., max_retries=3)
+```
+
+## Network Failures
+
+`NetworkError.request_sent` says whether the request left the machine:
+
+| Value | Meaning | Safe to re-send a write? |
+|-------|---------|--------------------------|
+| `False` | Connect-phase failure — the server never saw it | Yes, cleanly rejected |
+| `None` | Connection was up; may have been processed | No — unresolved state |
+
+```python
+try:
+    await client.place_order(...)
+except NetworkError as exc:
+    if exc.request_sent is False:
+        ...  # definitively not placed; safe to retry
+    else:
+        ...  # UNKNOWN — reconcile before acting
 ```
 
 ## Tracing

@@ -34,23 +34,23 @@ class TestRetryStrategy:
         config = RetryConfig(max_retries=3)
         strategy = RetryStrategy(config)
 
-        assert strategy.should_retry(0, 429) is True
-        assert strategy.should_retry(1, 500) is True
-        assert strategy.should_retry(2, 503) is True
+        assert strategy.should_retry(0, 429, method="GET") is True
+        assert strategy.should_retry(1, 500, method="GET") is True
+        assert strategy.should_retry(2, 503, method="GET") is True
 
     def test_should_not_retry_exhausted(self) -> None:
         config = RetryConfig(max_retries=3)
         strategy = RetryStrategy(config)
 
-        assert strategy.should_retry(3, 429) is False
+        assert strategy.should_retry(3, 429, method="GET") is False
 
     def test_should_not_retry_non_retryable_status(self) -> None:
         config = RetryConfig(max_retries=3)
         strategy = RetryStrategy(config)
 
-        assert strategy.should_retry(0, 400) is False
-        assert strategy.should_retry(0, 401) is False
-        assert strategy.should_retry(0, 404) is False
+        assert strategy.should_retry(0, 400, method="GET") is False
+        assert strategy.should_retry(0, 401, method="GET") is False
+        assert strategy.should_retry(0, 404, method="GET") is False
 
     def test_jitter_is_applied(self) -> None:
         config = RetryConfig(base_delay=1.0, max_delay=10.0, jitter=0.5)
@@ -63,4 +63,52 @@ class TestRetryStrategy:
         config = RetryConfig(max_retries=0)
         strategy = RetryStrategy(config)
 
-        assert strategy.should_retry(0, 429) is False
+        assert strategy.should_retry(0, 429, method="GET") is False
+
+
+class TestMethodAwareRetry:
+    """A 5xx means different things on a GET and on a POST /orders."""
+
+    def test_post_is_not_retried_on_5xx(self) -> None:
+        """The core guarantee: a 502 on a POST may have been processed upstream."""
+        strategy = RetryStrategy(RetryConfig(max_retries=3))
+
+        for status in (500, 502, 503, 504):
+            assert strategy.should_retry(0, status, method="POST") is False
+
+    def test_post_is_retried_on_429_by_default(self) -> None:
+        """Bayse rejects over-budget writes before the matching engine sees them."""
+        strategy = RetryStrategy(RetryConfig(max_retries=3))
+
+        assert strategy.should_retry(0, 429, method="POST") is True
+
+    def test_unsafe_statuses_are_configurable(self) -> None:
+        strategy = RetryStrategy(RetryConfig(max_retries=3, retry_unsafe_on_statuses=()))
+
+        assert strategy.should_retry(0, 429, method="POST") is False
+
+    def test_idempotency_key_reenables_5xx_retry_on_post(self) -> None:
+        strategy = RetryStrategy(RetryConfig(max_retries=3))
+
+        assert strategy.should_retry(0, 502, method="POST", idempotent=True) is True
+
+    def test_delete_is_idempotent_by_specification(self) -> None:
+        strategy = RetryStrategy(RetryConfig(max_retries=3))
+
+        assert strategy.should_retry(0, 502, method="DELETE") is True
+
+    def test_method_is_case_insensitive(self) -> None:
+        strategy = RetryStrategy(RetryConfig(max_retries=3))
+
+        assert strategy.should_retry(0, 502, method="get") is True
+        assert strategy.should_retry(0, 502, method="post") is False
+
+    def test_exhaustion_beats_idempotency(self) -> None:
+        strategy = RetryStrategy(RetryConfig(max_retries=2))
+
+        assert strategy.should_retry(2, 502, method="GET", idempotent=True) is False
+
+    def test_unsafe_retry_still_respects_max_retries(self) -> None:
+        strategy = RetryStrategy(RetryConfig(max_retries=2))
+
+        assert strategy.should_retry(2, 429, method="POST") is False

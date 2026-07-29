@@ -26,11 +26,14 @@ class PlaceOrderRequest(BaseModel):
 
 
 class Order(BaseModel):
-    """A prediction market order."""
+    """A prediction market order, as returned by the order-read routes."""
+
+    model_config = ConfigDict(populate_by_name=True)
 
     id: str
     market_id: str = Field(alias="marketId")
-    outcome: str = Field(alias="outcomeId")
+    outcome_id: str = Field(alias="outcomeId")
+    """UUID of the outcome. The wire key is ``outcomeId`` on this route."""
     side: str
     order_type: str = Field(alias="type")
     stp_mode: str = Field(alias="stpMode")
@@ -52,8 +55,17 @@ class PlacedOrder(BaseModel):
     Covers both AMM and CLOB engine shapes — all fields optional.
     """
 
+    model_config = ConfigDict(populate_by_name=True)
+
     id: str
-    outcome: str | None = None
+    outcome_id: str | None = Field(default=None, alias="outcome")
+    """UUID of the outcome.
+
+    The wire key here is ``outcome`` — not ``outcomeId`` as on the read routes —
+    but the value is the same outcome UUID. ``api-reference.md`` documents this
+    field as a ``YES``/``NO`` label; a live placement on 2026-07-29 returned a UUID,
+    so the docs are wrong, not the model.
+    """
     side: str | None = None
     type: str | None = None
     status: str | None = None

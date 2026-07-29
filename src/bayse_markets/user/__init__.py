@@ -8,7 +8,11 @@ import httpx
 from bayse_markets._config import Env, TraceConfig, base_url_for
 from bayse_markets._logging import get_logger
 from bayse_markets._retry import RetryConfig, RetryStrategy
-from bayse_markets.exceptions import NetworkError, error_from_response
+from bayse_markets.exceptions import (
+    NetworkError,
+    classify_request_sent,
+    error_from_response,
+)
 from bayse_markets.user.models import (
     ApiKey,
     CreateApiKeyRequest,
@@ -101,6 +105,7 @@ class UserClient:
         body_str = json.dumps(body) if body is not None else None
 
         max_retries = max_retries if max_retries is not None else self._retry.config.max_retries
+        replay_is_safe = self._retry.is_idempotent(method)
         attempt = 0
 
         while True:
@@ -118,13 +123,15 @@ class UserClient:
                 )
             except httpx.TimeoutException as exc:
                 raise NetworkError(
-                    message=f"Request timed out after {self._http.timeout}",
+                    message=f"Request timed out after {self._http.timeout} ({type(exc).__name__})",
                     original_exception=exc,
+                    request_sent=classify_request_sent(exc),
                 )
             except httpx.HTTPError as exc:
                 raise NetworkError(
-                    message=f"HTTP transport error: {exc}",
+                    message=f"HTTP transport error ({type(exc).__name__}): {exc}",
                     original_exception=exc,
+                    request_sent=classify_request_sent(exc),
                 )
 
             if resp.status_code < 400:
@@ -133,11 +140,33 @@ class UserClient:
                 return data
 
             if (
-                self._retry.should_retry(attempt, resp.status_code)
+                self._retry.should_retry(attempt, resp.status_code, method=method)
                 and attempt < max_retries
             ):
                 delay = self._retry.delay(attempt)
-                log.debug("UserClient retry (attempt %d, delay=%.2fs)", attempt, delay)
+                if replay_is_safe:
+                    log.debug(
+                        "UserClient retry %s %s after %d (attempt %d, delay=%.2fs, trace=%s)",
+                        method,
+                        path,
+                        resp.status_code,
+                        attempt + 1,
+                        delay,
+                        trace_id,
+                    )
+                else:
+                    # rotate_api_key returns its secret exactly once. A silent replay
+                    # would rotate twice and strand the first secret unrecoverably.
+                    log.warning(
+                        "UserClient retrying NON-IDEMPOTENT %s %s after %d "
+                        "(attempt %d, delay=%.2fs, trace=%s)",
+                        method,
+                        path,
+                        resp.status_code,
+                        attempt + 1,
+                        delay,
+                        trace_id,
+                    )
                 await asyncio.sleep(delay)
                 attempt += 1
                 continue

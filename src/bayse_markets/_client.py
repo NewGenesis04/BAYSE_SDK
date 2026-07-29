@@ -18,6 +18,7 @@ from bayse_markets._logging import get_logger
 from bayse_markets._retry import RetryStrategy
 from bayse_markets.exceptions import (
     NetworkError,
+    classify_request_sent,
     error_from_response,
 )
 from bayse_markets.models.activity import ListActivitiesResponse
@@ -148,6 +149,7 @@ class BayseClient:
         headers: dict[str, str] | None = None,
         trace_id: str | None = None,
         max_retries: int | None = None,
+        idempotent: bool = False,
     ) -> BayseResponse[Any]:
         body_str = None
         if body is not None:
@@ -165,6 +167,7 @@ class BayseClient:
         headers = base_headers
 
         max_retries = max_retries if max_retries is not None else self._retry.config.max_retries
+        replay_is_safe = self._retry.is_idempotent(method, idempotent=idempotent)
 
         attempt = 0
         while True:
@@ -186,13 +189,15 @@ class BayseClient:
                 )
             except httpx.TimeoutException as exc:
                 raise NetworkError(
-                    message=f"Request timed out after {self._timeout}s",
+                    message=f"Request timed out after {self._timeout}s ({type(exc).__name__})",
                     original_exception=exc,
+                    request_sent=classify_request_sent(exc),
                 )
             except httpx.HTTPError as exc:
                 raise NetworkError(
-                    message=f"HTTP transport error: {exc}",
+                    message=f"HTTP transport error ({type(exc).__name__}): {exc}",
                     original_exception=exc,
+                    request_sent=classify_request_sent(exc),
                 )
 
             log.debug(
@@ -212,9 +217,39 @@ class BayseClient:
                     trace_id=response_trace,
                 )
 
-            if self._retry.should_retry(attempt, resp.status_code) and attempt < max_retries:
+            if (
+                self._retry.should_retry(
+                    attempt,
+                    resp.status_code,
+                    method=method,
+                    idempotent=idempotent,
+                )
+                and attempt < max_retries
+            ):
                 delay = self._retry.delay(attempt)
-                log.debug("Retrying (attempt %d, delay=%.2fs)", attempt + 1, delay)
+                if replay_is_safe:
+                    log.debug(
+                        "Retrying %s %s after %d (attempt %d, delay=%.2fs, trace=%s)",
+                        method,
+                        path,
+                        resp.status_code,
+                        attempt + 1,
+                        delay,
+                        headers.get("x-trace-id"),
+                    )
+                else:
+                    # A retry of a non-idempotent call is an operator-visible event:
+                    # it is the only signal that a duplicate may exist upstream.
+                    log.warning(
+                        "Retrying NON-IDEMPOTENT %s %s after %d "
+                        "(attempt %d, delay=%.2fs, trace=%s)",
+                        method,
+                        path,
+                        resp.status_code,
+                        attempt + 1,
+                        delay,
+                        headers.get("x-trace-id"),
+                    )
                 await asyncio.sleep(delay)
                 attempt += 1
                 continue
@@ -569,11 +604,23 @@ class BayseClient:
             price: Limit price (required for ``LIMIT`` orders).
             time_in_force: ``"GTC"``, ``"GTD"``, ``"FAK"``, or ``"FOK"``.
             post_only: Whether to reject instead of crossing the spread.
-            stp_mode: Self-trade prevention mode for CLOB markets.
-            max_slippage: Max acceptable slippage for market orders.
+            stp_mode: Self-trade prevention mode for CLOB markets. One of
+                ``"SKIP"`` (default), ``"CANCEL_OLDEST"``, ``"CANCEL_NEWEST"``, or
+                ``"CANCEL_BOTH"``. Unrecognised values fall back to ``"SKIP"``
+                server-side without raising, so a typo silently disables
+                self-trade prevention.
+            max_slippage: Max acceptable slippage for ``MARKET`` orders. Accepted
+                range is **0 to 0.50** — the API rejects anything outside it with
+                ``400 "max slippage must be between 0 and 0.50"``. (Note
+                ``api-reference.md:1149`` documents the range as 0.00–1.00 and is
+                wrong.) The value is validated on submission but is **not echoed
+                back** in any response field, so there is no way to confirm from
+                the order which value was applied. Ignored for ``LIMIT`` orders,
+                where the limit price is the price protection.
             expires_at: ISO 8601 expiration (required for ``GTD``).
             trace_id: Optional trace ID for request correlation.
-            max_retries: Max retries for idempotent retries on 5xx.
+            max_retries: Maximum retry attempts. See ``RetryConfig`` for which
+                statuses are retried; non-idempotent calls use a narrower set.
 
         Returns:
             Response containing the placed order details.
@@ -626,13 +673,26 @@ class BayseClient:
         Supports filtering by side, status, event, market, outcome,
         and currency.
 
+        .. warning::
+            **Omitting** ``currency`` does not mean "all currencies" — the API
+            returns an empty page. An account holding 60 NGN orders returns
+            ``totalCount=0`` for both a bare call and ``currency="USD"``, with a
+            ``200`` and well-formed pagination, so the mistake is invisible.
+
+            Always pass ``currency`` explicitly, and call once per currency you
+            trade. Never treat a bare call's empty result as "this account has no
+            orders". This method logs a warning if it looks like you have.
+
+            Values are case-sensitive: use ``"NGN"``, not ``"ngn"``.
+
         Args:
             side: Filter by side (``"BUY"`` or ``"SELL"``).
             status: Filter by status (``"open"``, ``"filled"``, etc.).
             event_id: Filter by event UUID.
             market_id: Filter by market UUID.
             outcome_id: Filter by outcome UUID.
-            currency: Filter by currency (``"USD"`` or ``"NGN"``).
+            currency: Filter by currency (``"USD"`` or ``"NGN"``). Should always
+                be supplied — see the warning above.
             page: Page number (default 1).
             size: Results per page (default 20).
             trace_id: Optional trace ID for request correlation.
@@ -661,6 +721,19 @@ class BayseClient:
             trace_id=trace_id,
         )
         parsed = ListOrdersResponse.model_validate(resp.data)
+        if currency is None and not parsed.orders:
+            # An empty page here is far more often a missing `currency` filter
+            # than an empty account, and nothing in the response distinguishes
+            # the two. Anything reconciling state off this call would otherwise
+            # conclude there is nothing to reconcile.
+            log.warning(
+                "list_orders() returned no orders and no currency filter was set. "
+                "The API does not treat a missing 'currency' as 'all currencies' — "
+                "it returns an empty page. Pass currency='NGN'/'USD' explicitly, "
+                "once per currency you trade, before concluding this account is "
+                "flat. (trace=%s)",
+                resp.trace_id,
+            )
         return BayseResponse(
             status_code=resp.status_code,
             data=parsed,
@@ -714,7 +787,8 @@ class BayseClient:
         Args:
             order_id: UUID of the order to cancel.
             trace_id: Optional trace ID for request correlation.
-            max_retries: Max retries for idempotent retries on 5xx.
+            max_retries: Maximum retry attempts. See ``RetryConfig`` for which
+                statuses are retried; non-idempotent calls use a narrower set.
 
         Returns:
             Response confirming the cancellation.
@@ -757,7 +831,8 @@ class BayseClient:
             body: Batch order payload with ``orders`` array.
             idempotency_key: Optional key for idempotent retries.
             trace_id: Optional trace ID for request correlation.
-            max_retries: Max retries for idempotent retries on 5xx.
+            max_retries: Maximum retry attempts. See ``RetryConfig`` for which
+                statuses are retried; non-idempotent calls use a narrower set.
 
         Returns:
             Response containing batch placement results.
@@ -774,6 +849,7 @@ class BayseClient:
             headers=headers,
             trace_id=trace_id,
             max_retries=max_retries,
+            idempotent=idempotency_key is not None,
         )
         parsed = BatchPlaceResponse.model_validate(resp.data)
         return BayseResponse(
@@ -804,7 +880,8 @@ class BayseClient:
             body: Batch amend payload with ``orders`` array.
             idempotency_key: Optional key for idempotent retries.
             trace_id: Optional trace ID for request correlation.
-            max_retries: Max retries for idempotent retries on 5xx.
+            max_retries: Maximum retry attempts. See ``RetryConfig`` for which
+                statuses are retried; non-idempotent calls use a narrower set.
 
         Returns:
             Response containing batch amend results.
@@ -821,6 +898,7 @@ class BayseClient:
             headers=headers,
             trace_id=trace_id,
             max_retries=max_retries,
+            idempotent=idempotency_key is not None,
         )
         parsed = BatchAmendResponse.model_validate(resp.data)
         return BayseResponse(
@@ -850,7 +928,8 @@ class BayseClient:
             body: Batch cancel payload with ``orderIds`` array.
             idempotency_key: Optional key for idempotent retries.
             trace_id: Optional trace ID for request correlation.
-            max_retries: Max retries for idempotent retries on 5xx.
+            max_retries: Maximum retry attempts. See ``RetryConfig`` for which
+                statuses are retried; non-idempotent calls use a narrower set.
 
         Returns:
             Response containing batch cancellation results.

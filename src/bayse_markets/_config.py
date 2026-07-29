@@ -58,7 +58,30 @@ class RetryConfig:
     """Fixed jitter added to each delay: ``delay += random(0, jitter)``."""
 
     retry_on_statuses: tuple[int, ...] = (429, 500, 502, 503, 504)
-    """HTTP status codes that trigger a retry."""
+    """HTTP status codes that trigger a retry on safe or idempotent requests."""
+
+    retry_unsafe_on_statuses: tuple[int, ...] = (429,)
+    """HTTP status codes that trigger a retry on non-idempotent requests.
+
+    Deliberately narrower than :attr:`retry_on_statuses`. A ``502`` or ``504`` on a
+    ``POST`` may mean the upstream *did* process the request, so replaying it risks a
+    duplicate order. ``429`` is included because the Bayse rate limiter rejects
+    over-budget requests before they reach the matching engine, so a rate-limited write
+    never touched anything and is safe to replay.
+
+    Set to ``()`` to disable retries on non-idempotent requests entirely.
+    """
+
+    safe_methods: frozenset[str] = frozenset({"GET", "HEAD", "OPTIONS"})
+    """HTTP methods with no side effects. Always eligible for :attr:`retry_on_statuses`."""
+
+    idempotent_methods: frozenset[str] = frozenset({"PUT", "DELETE"})
+    """HTTP methods that are idempotent by specification.
+
+    Replaying these is expected to be a no-op — re-cancelling an already-cancelled
+    order returns an error rather than cancelling a second one. Treated the same as
+    :attr:`safe_methods` for retry purposes.
+    """
 
 
 @dataclass

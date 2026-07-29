@@ -24,11 +24,48 @@ class RetryStrategy:
         jitter = random.random() * self.config.jitter
         return capped + jitter
 
-    def should_retry(self, attempt: int, status_code: int) -> bool:
-        """Determine whether a retry should be attempted."""
+    def is_idempotent(self, method: str, *, idempotent: bool = False) -> bool:
+        """Whether replaying a ``method`` request is safe.
+
+        ``idempotent=True`` is how a caller declares safety the method itself cannot
+        express — most importantly, that an ``Idempotency-Key`` header was sent.
+        """
+        if idempotent:
+            return True
+        normalized = method.upper()
+        return (
+            normalized in self.config.safe_methods
+            or normalized in self.config.idempotent_methods
+        )
+
+    def should_retry(
+        self,
+        attempt: int,
+        status_code: int,
+        *,
+        method: str,
+        idempotent: bool = False,
+    ) -> bool:
+        """Determine whether a retry should be attempted.
+
+        Non-idempotent requests (``POST`` without an idempotency key) are held to the
+        narrower :attr:`~bayse_markets._config.RetryConfig.retry_unsafe_on_statuses`
+        set, because a ``5xx`` on a write may mean the server processed it and lost
+        the response.
+
+        Args:
+            attempt: Zero-indexed attempt number already made.
+            status_code: HTTP status of the response being judged.
+            method: HTTP method of the request. Required — the same status means
+                different things on a ``GET`` and on a ``POST /orders``.
+            idempotent: ``True`` when replaying is safe despite the method, e.g. an
+                ``Idempotency-Key`` was sent.
+        """
         if attempt >= self.config.max_retries:
             return False
-        return status_code in self.config.retry_on_statuses
+        if self.is_idempotent(method, idempotent=idempotent):
+            return status_code in self.config.retry_on_statuses
+        return status_code in self.config.retry_unsafe_on_statuses
 
     def sleep(self, attempt: int) -> None:
         """Blocking sleep. Used in synchronous contexts (rare).

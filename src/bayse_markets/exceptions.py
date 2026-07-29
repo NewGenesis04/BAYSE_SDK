@@ -63,15 +63,57 @@ class InternalServerError(BayseError):
 
 
 class NetworkError(BayseError):
-    """Transport-level error (connection timeout, DNS failure, SSL error, etc.)."""
+    """Transport-level error (connection timeout, DNS failure, SSL error, etc.).
 
-    def __init__(self, message: str, original_exception: Exception | None = None) -> None:
+    Attributes:
+        original_exception: The underlying ``httpx`` exception, class preserved.
+        request_sent: Whether the request reached the server.
+
+            * ``False`` — the connection was never established, so the server
+              definitively never saw it. A write that fails this way is cleanly
+              rejected and can be re-sent without risk of duplication.
+            * ``None`` — unknown. The connection was up when it failed, so the
+              request may well have been received and processed. Callers must treat
+              a failed write as an unresolved state.
+            * ``True`` — reserved; the SDK never claims certainty here today.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        original_exception: Exception | None = None,
+        request_sent: bool | None = None,
+    ) -> None:
         self.original_exception = original_exception
+        self.request_sent = request_sent
         super().__init__(
             error_code="network_error",
             message=message,
             status_code=0,
         )
+
+
+def classify_request_sent(exc: Exception) -> bool | None:
+    """Classify whether a transport exception left the machine.
+
+    Returns ``False`` only for connect-phase failures, where no bytes of the request
+    ever reached the server. Everything else returns ``None`` — once the connection is
+    established, a read failure cannot distinguish "never processed" from "processed,
+    response lost".
+    """
+    import httpx
+
+    never_sent = (
+        httpx.ConnectError,
+        httpx.ConnectTimeout,
+        httpx.PoolTimeout,
+        httpx.ProxyError,
+        httpx.UnsupportedProtocol,
+        httpx.InvalidURL,
+    )
+    if isinstance(exc, never_sent):
+        return False
+    return None
 
 
 _ERROR_CODE_MAP: dict[str, type[BayseError]] = {
