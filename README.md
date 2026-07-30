@@ -32,8 +32,9 @@ uv add bayse-markets
 
 Requires Python 3.12+.
 
-See [CHANGELOG.md](CHANGELOG.md) for release notes. **0.2.0 contains breaking
-changes** — if you are upgrading from 0.1.0, read
+See [CHANGELOG.md](CHANGELOG.md) for release notes. **0.3.0 adds `buy()` and
+`sell()` helpers** — see [Buy & Sell](#buy--sell) below. 0.2.0 contains breaking
+changes — if upgrading from 0.1.0, read
 [Migrating to 0.2.0](CHANGELOG.md#migrating-to-020).
 
 ---
@@ -176,7 +177,59 @@ async with UserClient() as user:
 
 ## More Examples
 
-### Place an order
+### Buy & Sell
+
+Two high-level helpers for the most common operations. They call `place_order`
+under the hood with the correct `side` and clearer parameter names.
+
+```python
+# Buy: spend 10,000 NGN on an outcome
+order = await client.buy(
+    event_id="evt_...",
+    market_id="mkt_...",
+    outcome_id="outcome_uuid",
+    amount=10000,       # cash spend in the target currency
+    order_type="LIMIT",
+    price=0.65,
+    currency="NGN",
+)
+print(f"Buy order {order.data.order.id} — {order.data.order.status}")
+```
+
+```python
+# Sell: liquidate 5.84 shares of an outcome
+# event_id / market_id resolved from portfolio automatically
+order = await client.sell(
+    outcome_id="outcome_uuid",
+    shares=5.84,        # share count to sell, NOT cash value
+    currency="NGN",
+)
+print(f"Sell order {order.data.order.id} — {order.data.order.status}")
+```
+
+Pass `event_id` and `market_id` explicitly to skip the portfolio lookup:
+
+```python
+order = await client.sell(
+    event_id="evt_...",
+    market_id="mkt_...",
+    outcome_id="outcome_uuid",
+    shares=5.84,
+    currency="NGN",
+)
+```
+
+### place_order — low-level control
+
+For advanced use cases that need every parameter (e.g. `stp_mode`,
+`max_slippage`, `post_only`, `time_in_force`).
+
+**Important:** `amount` has different semantics per side:
+- `side="BUY"`: `amount` is the **cash spend** in the target currency.
+- `side="SELL"`: `amount` is the **number of shares** to liquidate.
+
+For most use cases, prefer `buy()` or `sell()` — they set the correct side
+and name the parameter appropriately.
 
 ```python
 order = await client.place_order(

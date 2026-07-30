@@ -241,8 +241,7 @@ class BayseClient:
                     # A retry of a non-idempotent call is an operator-visible event:
                     # it is the only signal that a duplicate may exist upstream.
                     log.warning(
-                        "Retrying NON-IDEMPOTENT %s %s after %d "
-                        "(attempt %d, delay=%.2fs, trace=%s)",
+                        "Retrying NON-IDEMPOTENT %s %s after %d (attempt %d, delay=%.2fs, trace=%s)",
                         method,
                         path,
                         resp.status_code,
@@ -593,12 +592,21 @@ class BayseClient:
     ) -> BayseResponse[PlaceOrderResponse]:
         """Place a buy or sell order on a prediction market.
 
+        **Note:** Prefer ``buy()`` or ``sell()`` for clearer semantics.
+
         Args:
             event_id: UUID of the event.
             market_id: UUID of the market.
             side: ``"BUY"`` or ``"SELL"``.
             outcome_id: UUID of the outcome.
             amount: Amount to spend (buy) or receive (sell).
+
+                **Important:** ``amount`` has *different* semantics per side:
+
+                - When ``side="BUY"``: cash amount to spend in ``currency``
+                  (e.g. ``100.00`` = spend 100 NGN).
+                - When ``side="SELL"``: exact number of shares to liquidate
+                  (e.g. ``5.84`` = sell 5.84 shares).
             order_type: ``"LIMIT"`` or ``"MARKET"``.
             currency: ``"USD"`` (default) or ``"NGN"``.
             price: Limit price (required for ``LIMIT`` orders).
@@ -659,6 +667,95 @@ class BayseClient:
             timestamp=resp.timestamp,
             headers=resp.headers,
             trace_id=resp.trace_id,
+        )
+
+    async def sell(
+        self,
+        outcome_id: str,
+        shares: float,
+        event_id: str | None = None,
+        market_id: str | None = None,
+        currency: str = "NGN",
+        order_type: str = "MARKET",
+        **kwargs: Any,
+    ) -> BayseResponse[PlaceOrderResponse]:
+        """Sell a position by outcome ID and share count.
+
+        Args:
+            outcome_id: UUID of the outcome position to sell.
+            shares: Exact number of shares to liquidate (e.g. ``5.84``).
+            event_id: UUID of the event. If omitted, resolved from
+                the user's portfolio.
+            market_id: UUID of the market. If omitted, resolved from
+                the user's portfolio.
+            currency: Currency code (``"NGN"`` or ``"USD"``).
+            order_type: ``"MARKET"`` (default) or ``"LIMIT"``.
+            **kwargs: Additional arguments forwarded to ``place_order``.
+
+        Returns:
+            Response containing the placed order details.
+
+        Raises:
+            ValueError: If ``event_id`` or ``market_id`` is omitted and
+                no active position with ``outcome_id`` is found in the
+                user's portfolio.
+        """
+        if not event_id or not market_id:
+            portfolio = await self.get_portfolio()
+            pos = next(
+                (b for b in portfolio.data.outcome_balances if b.outcome_id == outcome_id),
+                None,
+            )
+            if pos is None:
+                raise ValueError(f"No active position found for outcome_id: {outcome_id}")
+            event_id = pos.market.event.id
+            market_id = pos.market.id
+
+        return await self.place_order(
+            event_id=event_id,
+            market_id=market_id,
+            outcome_id=outcome_id,
+            side="SELL",
+            amount=shares,
+            currency=currency,
+            order_type=order_type,
+            **kwargs,
+        )
+
+    async def buy(
+        self,
+        event_id: str,
+        market_id: str,
+        outcome_id: str,
+        amount: float,
+        currency: str = "NGN",
+        order_type: str = "MARKET",
+        **kwargs: Any,
+    ) -> BayseResponse[PlaceOrderResponse]:
+        """Buy shares by spending a specific cash amount.
+
+        Args:
+            event_id: UUID of the event.
+            market_id: UUID of the market.
+            outcome_id: UUID of the outcome.
+            amount: Cash amount to spend in the target currency
+                (e.g. ``100.00`` for 100 NGN).
+            currency: Currency code (``"NGN"`` or ``"USD"``).
+            order_type: ``"MARKET"`` (default) or ``"LIMIT"``.
+            **kwargs: Additional arguments forwarded to ``place_order``.
+
+        Returns:
+            Response containing the placed order details.
+        """
+        return await self.place_order(
+            event_id=event_id,
+            market_id=market_id,
+            outcome_id=outcome_id,
+            side="BUY",
+            amount=amount,
+            currency=currency,
+            order_type=order_type,
+            **kwargs,
         )
 
     async def list_orders(
@@ -1136,16 +1233,18 @@ class BayseClient:
             trace_id=trace_id,
         )
         parsed: dict[str, list[PricePoint]] = {}
-        for m in (resp.data.get("markets") or []):
+        for m in resp.data.get("markets") or []:
             market_id = m["marketId"]
             outcome = m.get("title", "")
             pts = []
-            for entry in (m.get("priceHistory") or []):
-                pts.append(PricePoint(
-                    outcome=outcome,
-                    price=entry["p"],
-                    timestamp=datetime.fromtimestamp(entry["e"] / 1000, tz=UTC),
-                ))
+            for entry in m.get("priceHistory") or []:
+                pts.append(
+                    PricePoint(
+                        outcome=outcome,
+                        price=entry["p"],
+                        timestamp=datetime.fromtimestamp(entry["e"] / 1000, tz=UTC),
+                    )
+                )
             if pts:
                 parsed[market_id] = pts
         return BayseResponse(

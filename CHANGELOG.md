@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-30
+
+### Added
+
+- `client.buy()` — high-level helper that calls `place_order` with `side="BUY"`.
+  Takes `event_id`, `market_id`, `outcome_id`, `amount` (cash spend), and forwards
+  to `place_order` with `side="BUY"` and `currency="NGN"` by default.
+
+- `client.sell()` — high-level helper that calls `place_order` with `side="SELL"`.
+  Takes `outcome_id`, `shares` (share count to liquidate), and optionally
+  `event_id`/`market_id`. If the latter are omitted, they are resolved
+  automatically from the user's portfolio by matching `outcome_id`. Raises
+  `ValueError` if no active position is found.
+
+- Manual test suite at `manual_test/test_buy_sell.py` covering both `buy()` and
+  `sell()` happy paths, error cases, and the auto-resolution fallback.
+
+### Changed
+
+- `place_order()` docstring now explicitly documents the asymmetric `amount`
+  semantics: cash spend on BUY, share count on SELL. The opening line also
+  suggests preferring `buy()` or `sell()` for clearer semantics.
+
 ## [0.2.1] - 2026-07-29
 
 A code review after the 0.2.0 release surfaced one unsafe default and several
@@ -181,7 +204,8 @@ Most callers need no changes. Review your code if any of the following apply:
 
 - Initial release.
 
-[Unreleased]: https://github.com/NewGenesis04/BAYSE_SDK/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/NewGenesis04/BAYSE_SDK/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/NewGenesis04/BAYSE_SDK/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/NewGenesis04/BAYSE_SDK/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/NewGenesis04/BAYSE_SDK/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/NewGenesis04/BAYSE_SDK/releases/tag/v0.1.0
